@@ -56,6 +56,20 @@
     ]
   },
   {
+    "id": "elixir_storage",
+    "name": "圣水瓶",
+    "category": "storage",
+    "size": 3,
+    "color": 11796735,
+    "icon": "🧪",
+    "maxCount": { "1": 1, "2": 1, "3": 2, "4": 2 },
+    "levels": [
+      { "cost": 300, "costType": "gold", "buildTime": 10, "hp": 400, "storageCapacity": 10000 },
+      { "cost": 750, "costType": "gold", "buildTime": 30, "hp": 500, "storageCapacity": 25000 },
+      { "cost": 1500, "costType": "gold", "buildTime": 60, "hp": 600, "storageCapacity": 50000 }
+    ]
+  },
+  {
     "id": "barracks",
     "name": "兵营",
     "category": "military",
