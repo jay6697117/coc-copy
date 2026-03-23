@@ -235,5 +235,19 @@
       { "cost": 6000, "costType": "elixir", "buildTime": 120, "hp": 650, "armyCapacity": 15 },
       { "cost": 10000, "costType": "elixir", "buildTime": 180, "hp": 800, "armyCapacity": 20 }
     ]
+  },
+  {
+    "id": "bomb_tower",
+    "name": "炸弹塔",
+    "category": "defense",
+    "size": 3,
+    "color": 16750848,
+    "icon": "💥",
+    "maxCount": { "3": 1, "4": 2 },
+    "levels": [
+      { "cost": 4000, "costType": "gold", "buildTime": 120, "hp": 500, "damage": 20, "attackSpeed": 1.0, "range": 5 },
+      { "cost": 8000, "costType": "gold", "buildTime": 180, "hp": 700, "damage": 28, "attackSpeed": 1.0, "range": 5 },
+      { "cost": 14000, "costType": "gold", "buildTime": 240, "hp": 900, "damage": 36, "attackSpeed": 1.0, "range": 6 }
+    ]
   }
 ]

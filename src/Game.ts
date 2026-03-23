@@ -47,7 +47,43 @@ const ACHIEVEMENTS = [
   { id: 'rich', name: '💰 富翁', desc: '同时拥有 10000 金币', check: (s: GameStats) => s.peakGold >= 10000 },
   { id: 'trainer', name: '🎖️ 训练大师', desc: '训练 50 个单位', check: (s: GameStats) => s.troopsTrained >= 50 },
   { id: 'looter', name: '🏴‍☠️ 掠夺者', desc: '总掠夺金币 10000', check: (s: GameStats) => s.totalGoldLooted >= 10000 },
+  { id: 'veteran', name: '🌟 老兵', desc: '赢得 10 场战斗', check: (s: GameStats) => s.battlesWon >= 10 },
+  { id: 'architect', name: '🏗️ 大建筑师', desc: '建造 15 个建筑', check: (s: GameStats) => s.buildingsPlaced >= 15 },
+  { id: 'crystal', name: '💎 水晶联赛', desc: '奖杯达到 1200', check: (_s: GameStats, t: number) => t >= 1200 },
+  { id: 'millionaire', name: '💰 百万富翁', desc: '总掠夺金币 100000', check: (s: GameStats) => s.totalGoldLooted >= 100000 },
+  { id: 'trainer_pro', name: '🏅 训练专家', desc: '训练 100 个单位', check: (s: GameStats) => s.troopsTrained >= 100 },
+  { id: 'champion', name: '👑 冠军联赛', desc: '奖杯达到 2000', check: (_s: GameStats, t: number) => t >= 2000 },
 ];
+
+/** 每日登录奖励（7 天循环） */
+const DAILY_REWARDS = [
+  { day: 1, gold: 500, elixir: 500, gems: 0 },
+  { day: 2, gold: 800, elixir: 800, gems: 0 },
+  { day: 3, gold: 1000, elixir: 1000, gems: 5 },
+  { day: 4, gold: 1500, elixir: 1500, gems: 0 },
+  { day: 5, gold: 2000, elixir: 2000, gems: 10 },
+  { day: 6, gold: 3000, elixir: 3000, gems: 0 },
+  { day: 7, gold: 5000, elixir: 5000, gems: 20 },
+];
+
+/** NPC 排行榜玩家 */
+const NPC_PLAYERS = [
+  { name: '德莫德', trophies: 2800, league: '👑' },
+  { name: '小红', trophies: 2200, league: '👑' },
+  { name: '天降正义', trophies: 1800, league: '💎' },
+  { name: '无敵小强', trophies: 1500, league: '💎' },
+  { name: '花花公子', trophies: 1100, league: '🥇' },
+  { name: '战神007', trophies: 900, league: '🥇' },
+  { name: '开心果', trophies: 600, league: '🥈' },
+  { name: '小美女', trophies: 350, league: '🥉' },
+];
+
+/** 部落模拟数据 */
+interface ClanData {
+  name: string;
+  members: { name: string; trophies: number; role: string }[];
+  messages: { sender: string; text: string; time: number }[];
+}
 
 interface GameStats {
   battlesTotal: number;
@@ -119,6 +155,11 @@ export class Game {
   private battleSpeed = 1;
   private defenseLog: DefenseLogEntry[] = [];
   private armyPresets: { name: string; army: { troopId: string; count: number }[] }[] = [];
+  private playerName = '首领';
+  private lastDailyRewardDate = '';
+  private dailyStreak = 0;
+  private clan: ClanData | null = null;
+  private notifications: { text: string; time: number }[] = [];
 
   async init(): Promise<void> {
     this.updateLoadingProgress(10, '初始化引擎...');
@@ -174,13 +215,17 @@ export class Game {
         const res = this.resourceManager.getResources();
         if (res.gold > this.stats.peakGold) this.stats.peakGold = res.gold;
         this.renderMinimap();
+        this.updateWeather(deltaMs);
+        this.updateFps(deltaMs);
       }
     });
 
     this.updateLoadingProgress(100, '完成！');
     setTimeout(() => { document.getElementById('loading-screen')?.classList.add('hidden'); this.maybeShowTutorial(); }, 600);
     this.setupKeyboardShortcuts();
-    console.log('🎮 COC Clone v0.7 初始化完成！');
+    this.checkDailyReward();
+    this.audio.playBgm('village');
+    console.log('🎮 COC Clone v1.0 初始化完成！');
   }
 
   // ===== 加载屏 =====
@@ -636,6 +681,7 @@ export class Game {
     this.setupDeployPanel();
     this.setupSpellButtons();
     this.castingSpellId = null;
+    this.audio.playBgm('battle');
 
     let lastTime = performance.now();
     const lastUnitHp = new Map<string, number>();
@@ -755,6 +801,8 @@ export class Game {
     if (result.stars >= 1) this.stats.battlesWon++;
     this.stats.totalGoldLooted += result.goldLooted;
     this.stats.totalElixirLooted += result.elixirLooted;
+    this.addDefenseLog(result, tc);
+    this.battlePassStars += result.stars;
 
     const te = document.getElementById('result-title');
     const se = document.getElementById('result-stars');
@@ -777,6 +825,7 @@ export class Game {
     this.battleRenderer.clearAll(); this.battleFx?.clearAll(); this.battleFx = null;
     this.armySystem.clearArmy();
     this.worldContainer.visible = true;
+    this.audio.playBgm('village');
     document.getElementById('build-panel')!.style.display = 'flex';
     document.getElementById('resource-panel')!.style.display = 'flex';
     document.getElementById('hint-text')!.style.display = 'block';
@@ -1003,7 +1052,53 @@ export class Game {
 
   private setupKeyboardShortcuts(): void {
     window.addEventListener('keydown', (e) => {
-      if (this.scene !== 'battle') return;
+      if (this.scene !== 'battle') {
+        // N 通知中心 / C 部落 / R 排行榜 / U 个人资料
+        if (e.key === 'n' || e.key === 'N') {
+          this.showNotifications();
+          document.getElementById('stats-panel')?.classList.add('show');
+          document.getElementById('overlay')?.classList.add('show');
+        }
+        if (e.key === 'c' || e.key === 'C') {
+          this.showClanPanel();
+          document.getElementById('stats-panel')?.classList.add('show');
+          document.getElementById('overlay')?.classList.add('show');
+        }
+        if (e.key === 'r' || e.key === 'R') {
+          this.showLeaderboard();
+          document.getElementById('stats-panel')?.classList.add('show');
+          document.getElementById('overlay')?.classList.add('show');
+        }
+        if (e.key === 'u' || e.key === 'U') {
+          this.showProfile();
+          document.getElementById('stats-panel')?.classList.add('show');
+          document.getElementById('overlay')?.classList.add('show');
+        }
+        if (e.key === 'h' || e.key === 'H') {
+          this.showHelp();
+          document.getElementById('stats-panel')?.classList.add('show');
+          document.getElementById('overlay')?.classList.add('show');
+        }
+        if (e.key === 's' || e.key === 'S') {
+          this.showSeasonShop();
+          document.getElementById('stats-panel')?.classList.add('show');
+          document.getElementById('overlay')?.classList.add('show');
+        }
+        if (e.key === 'b' || e.key === 'B') {
+          this.showBattlePass();
+          document.getElementById('stats-panel')?.classList.add('show');
+          document.getElementById('overlay')?.classList.add('show');
+        }
+        if (e.key === 'v' || e.key === 'V') {
+          this.showVillageLayouts();
+          document.getElementById('stats-panel')?.classList.add('show');
+          document.getElementById('overlay')?.classList.add('show');
+        }
+        if (e.key === 'F1') { e.preventDefault(); this.saveVillageLayout(0); }
+        if (e.key === 'F2') { e.preventDefault(); this.saveVillageLayout(1); }
+        if (e.key === 'F3') { e.preventDefault(); this.saveVillageLayout(2); }
+        return;
+      }
 
       // 数字键 1-9 选择兵种
       const num = parseInt(e.key);
@@ -1046,7 +1141,16 @@ export class Game {
       // D 键显示防御日志
       if (e.key === 'd' || e.key === 'D') {
         this.showDefenseLog();
-        this.openModal('stats-panel');
+        document.getElementById('stats-panel')?.classList.add('show');
+        document.getElementById('overlay')?.classList.add('show');
+      }
+
+      // P 键保存编队 / L 键加载编队
+      if (e.key === 'p' || e.key === 'P') {
+        this.saveArmyPreset(`编队${this.armyPresets.length + 1}`);
+      }
+      if (e.key === 'l' || e.key === 'L') {
+        if (this.armyPresets.length > 0) this.loadArmyPreset(this.armyPresets[0].name);
       }
     });
   }
@@ -1102,5 +1206,252 @@ export class Game {
     this.updateTrainButtons();
     this.updateArmyInfo();
     this.showToast(`✅ 编队「${name}」已加载`, 'success');
+  }
+
+  // ===== 每日奖励 =====
+
+  private checkDailyReward(): void {
+    const today = new Date().toDateString();
+    if (this.lastDailyRewardDate === today) return;
+    this.lastDailyRewardDate = today;
+    this.dailyStreak = (this.dailyStreak % 7) + 1;
+    const reward = DAILY_REWARDS[this.dailyStreak - 1];
+    this.resourceManager.earn(reward.gold, 'gold');
+    this.resourceManager.earn(reward.elixir, 'elixir');
+    if (reward.gems > 0) this.resourceManager.earn(reward.gems, 'gems');
+    const gemText = reward.gems > 0 ? ` + ${reward.gems}💎` : '';
+    this.showToast(`🎁 第${this.dailyStreak}天登录: +${reward.gold}金 +${reward.elixir}圣水${gemText}`, 'success');
+    this.addNotification(`每日奖励: +${reward.gold}💰 +${reward.elixir}💧${gemText}`);
+  }
+
+  // ===== 通知中心 =====
+
+  private addNotification(text: string): void {
+    this.notifications.unshift({ text, time: Date.now() });
+    if (this.notifications.length > 20) this.notifications.pop();
+  }
+
+  private showNotifications(): void {
+    const content = document.getElementById('stats-content');
+    if (!content) return;
+    let html = '<div style="font-weight:700;margin-bottom:8px">🔔 通知中心</div>';
+    if (this.notifications.length === 0) {
+      html += '<div style="color:#888;text-align:center;padding:16px">暂无通知</div>';
+    } else {
+      for (const n of this.notifications) {
+        const t = new Date(n.time);
+        const ts = `${t.getHours()}:${String(t.getMinutes()).padStart(2,'0')}`;
+        html += `<div class="stat-row"><span class="stat-name">${ts}</span><span class="stat-val">${n.text}</span></div>`;
+      }
+    }
+    content.innerHTML = html;
+  }
+
+  // ===== 部落系统（本地模拟） =====
+
+  private createClan(name: string): void {
+    this.clan = {
+      name,
+      members: [
+        { name: this.playerName, trophies: this.trophies, role: '首领' },
+        { name: '小兵甲', trophies: 200, role: '成员' },
+        { name: '小兵乙', trophies: 350, role: '成员' },
+        { name: '智囊团', trophies: 500, role: '长老' },
+      ],
+      messages: [
+        { sender: '系统', text: `部落「${name}」创建成功！`, time: Date.now() },
+        { sender: '智囊团', text: '欢迎加入！一起战斗吧！🎉', time: Date.now() + 1000 },
+      ],
+    };
+    this.showToast(`🏰 部落「${name}」创建成功！`, 'success');
+    this.addNotification(`创建部落: ${name}`);
+  }
+
+  private showClanPanel(): void {
+    const content = document.getElementById('stats-content');
+    if (!content) return;
+    if (!this.clan) {
+      content.innerHTML = '<div style="font-weight:700;margin-bottom:8px">🏰 部落</div>' +
+        '<div style="color:#888;text-align:center;padding:16px">你还没有加入部落</div>' +
+        '<div style="text-align:center"><button onclick="window.__clanCreate()" style="padding:8px 16px;background:#4a7;color:#fff;border:none;border-radius:8px;cursor:pointer">创建部落</button></div>';
+      (window as unknown as Record<string, unknown>).__clanCreate = () => { this.createClan('勇者联盟'); this.showClanPanel(); };
+      return;
+    }
+    let html = `<div style="font-weight:700;margin-bottom:8px">🏰 ${this.clan.name}</div>`;
+    html += '<div style="font-weight:600;margin:8px 0">成员</div>';
+    for (const m of this.clan.members) {
+      html += `<div class="stat-row"><span class="stat-name">${m.role === '首领' ? '👑' : m.role === '长老' ? '⭐' : '👤'} ${m.name}</span><span class="stat-val">🏆${m.trophies}</span></div>`;
+    }
+    html += '<div style="font-weight:600;margin:8px 0">聊天</div>';
+    for (const msg of this.clan.messages.slice(-5)) {
+      html += `<div class="stat-row"><span class="stat-name" style="color:#aaa">${msg.sender}</span><span class="stat-val">${msg.text}</span></div>`;
+    }
+    content.innerHTML = html;
+  }
+
+  // ===== 排行榜 =====
+
+  private showLeaderboard(): void {
+    const content = document.getElementById('stats-content');
+    if (!content) return;
+    const allPlayers = [...NPC_PLAYERS, { name: `⭐ ${this.playerName}`, trophies: this.trophies, league: getLeague(this.trophies).emoji }];
+    allPlayers.sort((a, b) => b.trophies - a.trophies);
+    let html = '<div style="font-weight:700;margin-bottom:8px">🏆 排行榜</div>';
+    allPlayers.forEach((p, i) => {
+      const isMe = p.name.startsWith('⭐');
+      html += `<div class="stat-row" style="${isMe ? 'background:#333;border-radius:6px;padding:4px 8px' : ''}"><span class="stat-name">${i+1}. ${p.league} ${p.name}</span><span class="stat-val">${p.trophies}🏆</span></div>`;
+    });
+    content.innerHTML = html;
+  }
+
+  // ===== 个人资料 =====
+
+  private showProfile(): void {
+    const content = document.getElementById('stats-content');
+    if (!content) return;
+    const league = getLeague(this.trophies);
+    let html = '<div style="font-weight:700;margin-bottom:12px;font-size:16px">👤 个人资料</div>';
+    html += `<div class="stat-row"><span class="stat-name">名字</span><span class="stat-val">${this.playerName}</span></div>`;
+    html += `<div class="stat-row"><span class="stat-name">联赛</span><span class="stat-val">${league.emoji} ${league.name}</span></div>`;
+    html += `<div class="stat-row"><span class="stat-name">奖杯</span><span class="stat-val">${this.trophies}🏆</span></div>`;
+    html += `<div class="stat-row"><span class="stat-name">总战斗</span><span class="stat-val">${this.stats.battlesTotal}</span></div>`;
+    html += `<div class="stat-row"><span class="stat-name">胜场</span><span class="stat-val">${this.stats.battlesWon}</span></div>`;
+    html += `<div class="stat-row"><span class="stat-name">建筑</span><span class="stat-val">${this.stats.buildingsPlaced}</span></div>`;
+    html += `<div class="stat-row"><span class="stat-name">训练</span><span class="stat-val">${this.stats.troopsTrained}</span></div>`;
+    html += `<div class="stat-row"><span class="stat-name">部落</span><span class="stat-val">${this.clan ? this.clan.name : '无'}</span></div>`;
+    html += `<div class="stat-row"><span class="stat-name">连续登录</span><span class="stat-val">${this.dailyStreak}天</span></div>`;
+    content.innerHTML = html;
+  }
+
+  // ===== 天气系统 =====
+
+  private weatherType: 'sunny' | 'cloudy' | 'rainy' = 'sunny';
+  private weatherTimer = 0;
+
+  private updateWeather(dt: number): void {
+    this.weatherTimer += dt;
+    if (this.weatherTimer < 60000) return; // 每 60 秒切换
+    this.weatherTimer = 0;
+    const r = Math.random();
+    this.weatherType = r < 0.5 ? 'sunny' : r < 0.8 ? 'cloudy' : 'rainy';
+    const canvas = this.app.canvas;
+    switch (this.weatherType) {
+      case 'sunny': canvas.style.filter = 'brightness(1.0)'; break;
+      case 'cloudy': canvas.style.filter = 'brightness(0.85)'; break;
+      case 'rainy': canvas.style.filter = 'brightness(0.7) saturate(0.8)'; break;
+    }
+  }
+
+  // ===== 赛季商店 =====
+
+  private showSeasonShop(): void {
+    const content = document.getElementById('stats-content');
+    if (!content) return;
+    const items = [
+      { name: '1000 金币', cost: 10, icon: '💰', type: 'gold' as const, amount: 1000 },
+      { name: '1000 圣水', cost: 10, icon: '💧', type: 'elixir' as const, amount: 1000 },
+      { name: '5000 金币', cost: 40, icon: '💰', type: 'gold' as const, amount: 5000 },
+      { name: '5000 圣水', cost: 40, icon: '💧', type: 'elixir' as const, amount: 5000 },
+      { name: '工人药水（加速建造）', cost: 50, icon: '⚡', type: 'gold' as const, amount: 0 },
+    ];
+    let html = '<div style="font-weight:700;margin-bottom:8px">🏪 赛季商店</div>';
+    for (const item of items) {
+      html += `<div class="stat-row"><span class="stat-name">${item.icon} ${item.name}</span><span class="stat-val">${item.cost}💎</span></div>`;
+    }
+    html += '<div style="color:#888;text-align:center;margin-top:8px;font-size:12px">点击商品使用宝石购买（功能演示）</div>';
+    content.innerHTML = html;
+  }
+
+  // ===== 战斗通行证 =====
+
+  private battlePassStars = 0;
+
+  private showBattlePass(): void {
+    const content = document.getElementById('stats-content');
+    if (!content) return;
+    const tiers = [
+      { stars: 5, reward: '500 金', icon: '💰' },
+      { stars: 10, reward: '500 圣水', icon: '💧' },
+      { stars: 20, reward: '10 宝石', icon: '💎' },
+      { stars: 35, reward: '2000 金', icon: '💰' },
+      { stars: 50, reward: '50 宝石', icon: '💎' },
+      { stars: 75, reward: '5000 金+圣水', icon: '🏆' },
+      { stars: 100, reward: '100 宝石', icon: '👑' },
+    ];
+    let html = `<div style="font-weight:700;margin-bottom:8px">🎖️ 战斗通行证 (${this.battlePassStars}⭐)</div>`;
+    for (const tier of tiers) {
+      const unlocked = this.battlePassStars >= tier.stars;
+      html += `<div class="stat-row" style="${unlocked ? 'opacity:0.5' : ''}"><span class="stat-name">${tier.icon} ${tier.reward}</span><span class="stat-val">${unlocked ? '✅' : `${tier.stars}⭐`}</span></div>`;
+    }
+    content.innerHTML = html;
+  }
+
+  // ===== 村庄布局保存 =====
+
+  private villageLayouts: { name: string; buildings: { configId: string; gridX: number; gridY: number; level: number }[] }[] = [];
+
+  private saveVillageLayout(slot: number): void {
+    const buildings = this.buildingSystem.getAllBuildings().map(b => ({
+      configId: b.configId, gridX: b.gridX, gridY: b.gridY, level: b.level,
+    }));
+    const name = `布局 ${slot + 1}`;
+    this.villageLayouts[slot] = { name, buildings };
+    this.showToast(`💾 ${name} 已保存（${buildings.length} 建筑）`, 'success');
+  }
+
+  private showVillageLayouts(): void {
+    const content = document.getElementById('stats-content');
+    if (!content) return;
+    let html = '<div style="font-weight:700;margin-bottom:8px">🗺️ 村庄布局</div>';
+    for (let i = 0; i < 3; i++) {
+      const layout = this.villageLayouts[i];
+      if (layout) {
+        html += `<div class="stat-row"><span class="stat-name">📐 ${layout.name} (${layout.buildings.length}建筑)</span><span class="stat-val">已保存</span></div>`;
+      } else {
+        html += `<div class="stat-row"><span class="stat-name">📐 布局 ${i+1}</span><span class="stat-val" style="color:#888">空</span></div>`;
+      }
+    }
+    html += '<div style="color:#888;text-align:center;margin-top:8px;font-size:12px">按 F1/F2/F3 保存对应槽位</div>';
+    content.innerHTML = html;
+  }
+
+  // ===== 帮助面板 =====
+
+  private showHelp(): void {
+    const content = document.getElementById('stats-content');
+    if (!content) return;
+    let html = '<div style="font-weight:700;margin-bottom:8px">❓ 游戏帮助</div>';
+    const shortcuts = [
+      ['N', '通知中心'], ['C', '部落面板'], ['R', '排行榜'], ['U', '个人资料'],
+      ['H', '帮助/快捷键'], ['S', '赛季商店'], ['B', '战斗通行证'], ['V', '村庄布局'],
+      ['1-9', '选择兵种（战斗）'], ['Q/E', '闪电/治愈法术'], ['Space', '全部署'],
+      ['X', '倍速切换'], ['D', '防御日志'], ['P/L', '保存/加载编队'],
+      ['F1-F3', '保存村庄布局'],
+    ];
+    html += '<div style="font-weight:600;margin:8px 0">⌨️ 快捷键</div>';
+    for (const [key, desc] of shortcuts) {
+      html += `<div class="stat-row"><span class="stat-name" style="font-family:monospace;background:#333;padding:2px 6px;border-radius:4px">${key}</span><span class="stat-val">${desc}</span></div>`;
+    }
+    html += '<div style="font-weight:600;margin:8px 0">📖 玩法说明</div>';
+    html += '<div style="color:#ccc;font-size:12px;line-height:1.8">建造建筑 → 训练军队 → 搜索对手 → 部署作战 → 掠夺资源 → 升级壮大</div>';
+    content.innerHTML = html;
+  }
+
+  // ===== FPS 监控 =====
+
+  private fpsFrames = 0;
+  private fpsTime = 0;
+  private fpsDisplay = 60;
+
+  private updateFps(dt: number): void {
+    this.fpsFrames++;
+    this.fpsTime += dt;
+    if (this.fpsTime >= 1000) {
+      this.fpsDisplay = Math.round(this.fpsFrames * 1000 / this.fpsTime);
+      this.fpsFrames = 0;
+      this.fpsTime = 0;
+      const el = document.getElementById('fps-counter');
+      if (el) el.textContent = `${this.fpsDisplay} FPS`;
+    }
   }
 }

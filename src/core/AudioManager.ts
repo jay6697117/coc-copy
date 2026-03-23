@@ -71,6 +71,55 @@ export class AudioManager {
   }
 
   setVolume(v: number): void { this.volume = Math.max(0, Math.min(1, v)); }
-  setEnabled(e: boolean): void { this.enabled = e; }
+  setEnabled(e: boolean): void { this.enabled = e; if (!e) this.stopBgm(); }
   isEnabled(): boolean { return this.enabled; }
+
+  // ===== 背景音乐 =====
+
+  private bgmNodes: { osc: OscillatorNode[]; gain: GainNode } | null = null;
+  private bgmType: 'village' | 'battle' | null = null;
+
+  /** 播放循环 BGM */
+  playBgm(type: 'village' | 'battle'): void {
+    if (!this.enabled) return;
+    if (this.bgmType === type) return;
+    this.stopBgm();
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    this.bgmType = type;
+
+    const gain = ctx.createGain();
+    gain.gain.value = 0;
+    gain.connect(ctx.destination);
+    // 淡入
+    gain.gain.linearRampToValueAtTime(this.volume * 0.08, ctx.currentTime + 1);
+
+    const oscs: OscillatorNode[] = [];
+    const notes = type === 'village'
+      ? [262, 330, 392] // C 大调和弦（温暖村庄）
+      : [220, 277, 330]; // A 小调和弦（紧张战斗）
+
+    for (const freq of notes) {
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      osc.connect(gain);
+      osc.start();
+      oscs.push(osc);
+    }
+
+    this.bgmNodes = { osc: oscs, gain };
+  }
+
+  /** 停止 BGM */
+  stopBgm(): void {
+    if (!this.bgmNodes) return;
+    try {
+      this.bgmNodes.gain.gain.linearRampToValueAtTime(0, (this.ctx?.currentTime ?? 0) + 0.5);
+      const nodes = this.bgmNodes;
+      setTimeout(() => { nodes.osc.forEach(o => { try { o.stop(); } catch {} }); }, 600);
+    } catch {}
+    this.bgmNodes = null;
+    this.bgmType = null;
+  }
 }
