@@ -1,0 +1,79 @@
+[
+  {
+    "id": "barbarian",
+    "name": "野蛮人",
+    "icon": "⚔️",
+    "housingSpace": 1,
+    "trainTime": 5,
+    "favoriteTarget": "any",
+    "moveSpeed": 16,
+    "attackType": "melee",
+    "levels": [
+      { "cost": 25, "costType": "elixir", "hp": 45, "damage": 8, "attackSpeed": 1.0 },
+      { "cost": 40, "costType": "elixir", "hp": 54, "damage": 11, "attackSpeed": 1.0 },
+      { "cost": 60, "costType": "elixir", "hp": 65, "damage": 14, "attackSpeed": 1.0 }
+    ]
+  },
+  {
+    "id": "archer",
+    "name": "弓箭手",
+    "icon": "🏹",
+    "housingSpace": 1,
+    "trainTime": 6,
+    "favoriteTarget": "any",
+    "moveSpeed": 14,
+    "attackType": "ranged",
+    "attackRange": 7,
+    "levels": [
+      { "cost": 50, "costType": "elixir", "hp": 20, "damage": 7, "attackSpeed": 1.0 },
+      { "cost": 80, "costType": "elixir", "hp": 23, "damage": 9, "attackSpeed": 1.0 },
+      { "cost": 120, "costType": "elixir", "hp": 28, "damage": 12, "attackSpeed": 1.0 }
+    ]
+  },
+  {
+    "id": "giant",
+    "name": "巨人",
+    "icon": "🧌",
+    "housingSpace": 5,
+    "trainTime": 30,
+    "favoriteTarget": "defense",
+    "moveSpeed": 8,
+    "attackType": "melee",
+    "levels": [
+      { "cost": 250, "costType": "elixir", "hp": 300, "damage": 11, "attackSpeed": 2.0 },
+      { "cost": 500, "costType": "elixir", "hp": 360, "damage": 14, "attackSpeed": 2.0 },
+      { "cost": 1000, "costType": "elixir", "hp": 430, "damage": 18, "attackSpeed": 2.0 }
+    ]
+  },
+  {
+    "id": "goblin",
+    "name": "哥布林",
+    "icon": "👺",
+    "housingSpace": 1,
+    "trainTime": 7,
+    "favoriteTarget": "resource",
+    "moveSpeed": 22,
+    "attackType": "melee",
+    "levels": [
+      { "cost": 25, "costType": "elixir", "hp": 25, "damage": 11, "attackSpeed": 1.0 },
+      { "cost": 40, "costType": "elixir", "hp": 30, "damage": 14, "attackSpeed": 1.0 },
+      { "cost": 60, "costType": "elixir", "hp": 36, "damage": 18, "attackSpeed": 1.0 }
+    ]
+  },
+  {
+    "id": "wall_breaker",
+    "name": "炸弹人",
+    "icon": "💀",
+    "housingSpace": 2,
+    "trainTime": 15,
+    "favoriteTarget": "wall",
+    "moveSpeed": 16,
+    "attackType": "melee",
+    "isSplash": true,
+    "levels": [
+      { "cost": 150, "costType": "elixir", "hp": 20, "damage": 12, "attackSpeed": 1.0, "wallDamageMultiplier": 40 },
+      { "cost": 300, "costType": "elixir", "hp": 24, "damage": 16, "attackSpeed": 1.0, "wallDamageMultiplier": 40 },
+      { "cost": 600, "costType": "elixir", "hp": 29, "damage": 20, "attackSpeed": 1.0, "wallDamageMultiplier": 40 }
+    ]
+  }
+]

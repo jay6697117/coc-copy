@@ -78,6 +78,7 @@ export class DataStore {
         },
       ],
       lastOnlineTime: Date.now(),
+      army: [],
     };
   }
 }

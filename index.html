@@ -9,6 +9,7 @@
       * { margin: 0; padding: 0; box-sizing: border-box; }
       html, body { width: 100%; height: 100%; overflow: hidden; background: #1a1a2e; font-family: 'Arial', sans-serif; }
       #game-container { width: 100%; height: 100%; position: relative; }
+
       /* 建造面板 */
       #build-panel {
         position: fixed; bottom: 0; left: 0; right: 0; height: 90px;
@@ -17,7 +18,7 @@
         display: flex; align-items: center; padding: 0 16px; gap: 8px;
         z-index: 100; overflow-x: auto;
       }
-      .build-btn {
+      .build-btn, .train-btn, .action-btn {
         flex-shrink: 0; width: 70px; height: 75px;
         border: 2px solid #444; border-radius: 10px;
         background: linear-gradient(180deg, #2a2a4a 0%, #1a1a3a 100%);
@@ -25,13 +26,28 @@
         display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
         transition: all 0.2s; position: relative;
       }
-      .build-btn:hover { border-color: #88f; background: linear-gradient(180deg, #3a3a5a 0%, #2a2a4a 100%); transform: translateY(-2px); }
+      .build-btn:hover, .train-btn:hover, .action-btn:hover {
+        border-color: #88f; background: linear-gradient(180deg, #3a3a5a 0%, #2a2a4a 100%); transform: translateY(-2px);
+      }
       .build-btn.active { border-color: #4f4; background: linear-gradient(180deg, #2a4a2a 0%, #1a3a1a 100%); }
-      .build-btn.disabled { opacity: 0.4; cursor: not-allowed; }
-      .build-btn .icon { font-size: 24px; }
-      .build-btn .label { font-size: 9px; white-space: nowrap; color: #ccc; }
-      .build-btn .cost { font-size: 8px; color: #ffd700; white-space: nowrap; }
-      .build-btn .cost.elixir { color: #e040fb; }
+      .build-btn.disabled, .train-btn.disabled { opacity: 0.4; cursor: not-allowed; }
+      .build-btn .icon, .train-btn .icon, .action-btn .icon { font-size: 24px; }
+      .build-btn .label, .train-btn .label, .action-btn .label { font-size: 9px; white-space: nowrap; color: #ccc; }
+      .build-btn .cost, .train-btn .cost { font-size: 8px; color: #ffd700; white-space: nowrap; }
+      .build-btn .cost.elixir, .train-btn .cost.elixir { color: #e040fb; }
+
+      .action-btn.attack {
+        background: linear-gradient(180deg, #8b2a2a 0%, #5a1a1a 100%);
+        border-color: #ff4444;
+      }
+      .action-btn.attack:hover {
+        background: linear-gradient(180deg, #aa3a3a 0%, #7a2a2a 100%);
+      }
+      .action-btn.train-tab {
+        background: linear-gradient(180deg, #2a4a6a 0%, #1a3a5a 100%);
+        border-color: #4488cc;
+      }
+
       /* 资源面板 */
       #resource-panel {
         position: fixed; top: 0; left: 0; right: 0; height: 44px;
@@ -47,6 +63,8 @@
       #gold-value { color: #ffd700; }
       #elixir-value { color: #e040fb; }
       #gem-value { color: #4fc3f7; }
+      .army-info { margin-left: auto; color: #aaa; font-size: 12px; }
+
       /* 提示文字 */
       #hint-text {
         position: fixed; bottom: 100px; left: 50%; transform: translateX(-50%);
@@ -54,8 +72,9 @@
         padding: 6px 16px; border-radius: 16px; font-size: 12px;
         z-index: 100; pointer-events: none; transition: opacity 0.3s;
       }
+
       /* 建筑信息弹窗 */
-      #building-info {
+      #building-info, #battle-result {
         display: none; position: fixed; top: 50%; left: 50%;
         transform: translate(-50%, -50%);
         width: 300px; max-width: 90vw;
@@ -64,20 +83,16 @@
         padding: 20px; z-index: 200; color: #fff;
         box-shadow: 0 8px 32px rgba(0,0,0,0.6);
       }
-      #building-info.show { display: block; }
-      #building-info .info-header {
-        display: flex; align-items: center; gap: 12px; margin-bottom: 16px;
-      }
+      #building-info.show, #battle-result.show { display: block; }
+      #building-info .info-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
       #building-info .info-icon { font-size: 36px; }
       #building-info .info-title { font-size: 18px; font-weight: bold; }
       #building-info .info-level { font-size: 13px; color: #aaa; }
-      #building-info .info-stats {
-        margin-bottom: 16px; font-size: 13px; line-height: 1.8;
-      }
+      #building-info .info-stats { margin-bottom: 16px; font-size: 13px; line-height: 1.8; }
       #building-info .info-stats .stat-label { color: #999; }
       #building-info .info-stats .stat-value { color: #fff; font-weight: bold; }
       #building-info .info-actions { display: flex; gap: 8px; }
-      #building-info .info-btn {
+      #building-info .info-btn, #battle-result .result-btn {
         flex: 1; padding: 10px; border: none; border-radius: 8px;
         color: #fff; font-size: 13px; font-weight: bold; cursor: pointer;
         transition: all 0.2s;
@@ -86,19 +101,74 @@
       #info-upgrade-btn:hover { background: linear-gradient(180deg, #5ab03a 0%, #3a7a2a 100%); }
       #info-upgrade-btn:disabled { background: #444; color: #888; cursor: not-allowed; }
       #info-move-btn { background: linear-gradient(180deg, #3a5a9a 0%, #2a3a6a 100%); }
-      #info-move-btn:hover { background: linear-gradient(180deg, #4a6aaa 0%, #3a4a7a 100%); }
       #info-close-btn { background: linear-gradient(180deg, #6a3a3a 0%, #4a2a2a 100%); }
-      #info-close-btn:hover { background: linear-gradient(180deg, #7a4a4a 0%, #5a3a3a 100%); }
+
       /* 弹窗遮罩 */
-      #overlay {
-        display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-        background: rgba(0,0,0,0.4); z-index: 199;
-      }
+      #overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 199; }
       #overlay.show { display: block; }
+
+      /* 训练面板 */
+      #train-panel {
+        display: none; position: fixed; bottom: 0; left: 0; right: 0; height: 90px;
+        background: linear-gradient(180deg, rgba(20,40,60,0.95) 0%, rgba(10,20,40,0.98) 100%);
+        border-top: 2px solid #4488cc;
+        align-items: center; padding: 0 16px; gap: 8px;
+        z-index: 100; overflow-x: auto;
+      }
+      #train-panel.show { display: flex; }
+
+      /* 战斗 HUD */
+      #battle-hud {
+        display: none; position: fixed; top: 0; left: 0; right: 0; height: 50px;
+        background: linear-gradient(180deg, rgba(60,10,10,0.95) 0%, rgba(40,10,10,0.9) 100%);
+        border-bottom: 2px solid #ff4444;
+        align-items: center; padding: 0 20px; gap: 16px;
+        z-index: 100; color: #fff; font-size: 14px;
+      }
+      #battle-hud.show { display: flex; }
+      .battle-stat { display: flex; align-items: center; gap: 4px; }
+      .star { color: #888; font-size: 18px; }
+      .star.earned { color: #ffd700; }
+
+      /* 战斗部署栏 */
+      #deploy-panel {
+        display: none; position: fixed; bottom: 0; left: 0; right: 0; height: 90px;
+        background: linear-gradient(180deg, rgba(40,10,10,0.95) 0%, rgba(20,5,5,0.98) 100%);
+        border-top: 2px solid #cc3333;
+        align-items: center; padding: 0 16px; gap: 8px;
+        z-index: 100; overflow-x: auto;
+      }
+      #deploy-panel.show { display: flex; }
+      .deploy-btn {
+        flex-shrink: 0; width: 70px; height: 75px;
+        border: 2px solid #cc3333; border-radius: 10px;
+        background: linear-gradient(180deg, #4a2a2a 0%, #3a1a1a 100%);
+        color: #fff; cursor: pointer;
+        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+        transition: all 0.2s;
+      }
+      .deploy-btn:hover { border-color: #ff6666; transform: translateY(-2px); }
+      .deploy-btn.active { border-color: #ff0; background: linear-gradient(180deg, #5a4a1a 0%, #4a3a0a 100%); }
+      .deploy-btn .icon { font-size: 24px; }
+      .deploy-btn .label { font-size: 9px; color: #ccc; }
+      .deploy-btn .count { font-size: 11px; color: #ff8888; font-weight: bold; }
+
+      /* 战斗结算 */
+      #battle-result { text-align: center; }
+      #battle-result .result-title { font-size: 22px; font-weight: bold; margin-bottom: 12px; }
+      #battle-result .result-stars { font-size: 32px; margin-bottom: 12px; }
+      #battle-result .result-stats { font-size: 14px; line-height: 2; margin-bottom: 16px; }
+      .result-btn {
+        background: linear-gradient(180deg, #3a5a9a 0%, #2a3a6a 100%);
+        padding: 12px; border: none; border-radius: 8px;
+        color: #fff; font-size: 14px; font-weight: bold; cursor: pointer; width: 100%;
+      }
     </style>
   </head>
   <body>
     <div id="game-container"></div>
+
+    <!-- 资源面板 -->
     <div id="resource-panel">
       <div class="resource-item">
         <span class="icon">🪙</span>
@@ -114,10 +184,32 @@
         <span class="icon">💎</span>
         <span class="value" id="gem-value">0</span>
       </div>
+      <div class="army-info" id="army-info">⚔️ 0/20</div>
     </div>
+
+    <!-- 建造面板（村庄模式） -->
     <div id="build-panel"></div>
     <div id="hint-text">拖拽平移 | 滚轮缩放 | 点击下方建筑开始建造</div>
-    <!-- 建筑信息弹窗 -->
+
+    <!-- 训练面板 -->
+    <div id="train-panel"></div>
+
+    <!-- 战斗 HUD -->
+    <div id="battle-hud">
+      <div class="battle-stat">⏱ <span id="battle-timer">3:00</span></div>
+      <div class="battle-stat" id="battle-stars">
+        <span class="star" id="star1">⭐</span>
+        <span class="star" id="star2">⭐</span>
+        <span class="star" id="star3">⭐</span>
+      </div>
+      <div class="battle-stat">💥 <span id="battle-percent">0%</span></div>
+      <button id="end-battle-btn" style="margin-left:auto; background:#cc3333; border:none; color:#fff; padding:6px 14px; border-radius:6px; cursor:pointer; font-size:12px;">撤退</button>
+    </div>
+
+    <!-- 战斗部署栏 -->
+    <div id="deploy-panel"></div>
+
+    <!-- 弹窗 -->
     <div id="overlay"></div>
     <div id="building-info">
       <div class="info-header">
@@ -130,10 +222,19 @@
       <div class="info-stats" id="info-stats"></div>
       <div class="info-actions">
         <button class="info-btn" id="info-upgrade-btn">升级</button>
-        <button class="info-btn" id="info-move-btn">移动</button>
-        <button class="info-btn" id="info-close-btn">关闭</button>
+        <button class="info-btn" id="info-move-btn" style="background:linear-gradient(180deg,#3a5a9a 0%,#2a3a6a 100%)">移动</button>
+        <button class="info-btn" id="info-close-btn" style="background:linear-gradient(180deg,#6a3a3a 0%,#4a2a2a 100%)">关闭</button>
       </div>
     </div>
+
+    <!-- 战斗结算 -->
+    <div id="battle-result">
+      <div class="result-title" id="result-title">胜利！</div>
+      <div class="result-stars" id="result-stars">⭐⭐⭐</div>
+      <div class="result-stats" id="result-stats"></div>
+      <button class="result-btn" id="result-return-btn">返回村庄</button>
+    </div>
+
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

@@ -7,61 +7,37 @@ export type BuildingCategory = 'resource' | 'storage' | 'military' | 'defense' |
 
 /** 建筑等级配置 */
 export interface BuildingLevelConfig {
-  /** 升级费用（金币或圣水） */
   cost: number;
-  /** 费用类型 */
   costType: 'gold' | 'elixir';
-  /** 升级时间（秒） */
   buildTime: number;
-  /** 生命值 */
   hp: number;
-  /** 产出速率（每小时，仅 resource 类型有） */
   productionRate?: number;
-  /** 存储容量（仅 storage 类型有） */
   storageCapacity?: number;
-  /** 伤害（仅 defense 类型有） */
   damage?: number;
-  /** 攻击范围（格数，仅 defense 类型有） */
   range?: number;
-  /** 攻击速度（秒/次，仅 defense 类型有） */
   attackSpeed?: number;
 }
 
-/** 建筑配置（来自 JSON 数据文件） */
+/** 建筑配置 */
 export interface BuildingConfig {
-  /** 建筑唯一标识 */
   id: string;
-  /** 显示名称 */
   name: string;
-  /** 建筑类别 */
   category: BuildingCategory;
-  /** 占据的网格大小（NxN） */
   size: number;
-  /** 显示颜色（十六进制） */
   color: number;
-  /** 显示图标（emoji） */
   icon: string;
-  /** 每个大本营等级可建造的最大数量 */
   maxCount: Record<number, number>;
-  /** 各等级配置 */
   levels: BuildingLevelConfig[];
 }
 
 /** 已放置的建筑实例 */
 export interface BuildingInstance {
-  /** 实例唯一 ID */
   uid: string;
-  /** 建筑配置 ID */
   configId: string;
-  /** 网格 X 坐标（左上角） */
   gridX: number;
-  /** 网格 Y 坐标（左上角） */
   gridY: number;
-  /** 当前等级（从 1 开始） */
   level: number;
-  /** 是否正在升级 */
   isUpgrading: boolean;
-  /** 升级完成时间戳（ms） */
   upgradeEndTime?: number;
 }
 
@@ -74,25 +50,126 @@ export interface PlayerResources {
 
 /** 玩家存档数据 */
 export interface SaveData {
-  /** 大本营等级 */
   townHallLevel: number;
-  /** 资源 */
   resources: PlayerResources;
-  /** 已放置的建筑 */
   buildings: BuildingInstance[];
-  /** 上次在线时间戳 */
+  army: ArmySlot[];
   lastOnlineTime: number;
 }
 
 /** 网格单元格状态 */
 export interface GridCell {
-  /** 是否被建筑占用 */
   occupied: boolean;
-  /** 占用该格的建筑实例 UID（如果有） */
   buildingUid?: string;
 }
 
-/** 游戏事件类型映射 */
+// ============================================================
+// 兵种相关类型
+// ============================================================
+
+/** 兵种等级配置 */
+export interface TroopLevelConfig {
+  cost: number;
+  costType: 'gold' | 'elixir';
+  hp: number;
+  damage: number;
+  attackSpeed: number;
+  wallDamageMultiplier?: number;
+}
+
+/** 兵种偏好目标 */
+export type FavoriteTarget = 'any' | 'defense' | 'resource' | 'wall';
+
+/** 兵种配置（来自 JSON） */
+export interface TroopConfig {
+  id: string;
+  name: string;
+  icon: string;
+  housingSpace: number;
+  trainTime: number;
+  favoriteTarget: FavoriteTarget;
+  moveSpeed: number;
+  attackType: 'melee' | 'ranged';
+  attackRange?: number;
+  isSplash?: boolean;
+  levels: TroopLevelConfig[];
+}
+
+/** 军队槽位 */
+export interface ArmySlot {
+  troopId: string;
+  count: number;
+  level: number;
+}
+
+// ============================================================
+// 战斗相关类型
+// ============================================================
+
+/** 战斗阶段 */
+export type BattlePhase = 'preparing' | 'deploying' | 'fighting' | 'ended';
+
+/** 战场上的单位实例 */
+export interface BattleUnit {
+  uid: string;
+  troopId: string;
+  x: number;
+  y: number;
+  hp: number;
+  maxHp: number;
+  damage: number;
+  attackSpeed: number;
+  moveSpeed: number;
+  attackType: 'melee' | 'ranged';
+  attackRange: number;
+  favoriteTarget: FavoriteTarget;
+  targetUid: string | null;
+  attackCooldown: number;
+  state: 'moving' | 'attacking' | 'dead';
+}
+
+/** 战场上的防御建筑实例 */
+export interface BattleDefense {
+  uid: string;
+  configId: string;
+  gridX: number;
+  gridY: number;
+  size: number;
+  hp: number;
+  maxHp: number;
+  damage: number;
+  range: number;
+  attackSpeed: number;
+  attackCooldown: number;
+  targetUid: string | null;
+  destroyed: boolean;
+}
+
+/** 战场上的非防御建筑实例 */
+export interface BattleBuilding {
+  uid: string;
+  configId: string;
+  gridX: number;
+  gridY: number;
+  size: number;
+  hp: number;
+  maxHp: number;
+  destroyed: boolean;
+  isTownHall: boolean;
+}
+
+/** 战斗结果 */
+export interface BattleResult {
+  stars: number;
+  percentDestroyed: number;
+  goldLooted: number;
+  elixirLooted: number;
+}
+
+// ============================================================
+// 事件类型映射
+// ============================================================
+
 export interface GameEvents {
   'building:placed': { building: BuildingInstance };
   'building:moved': { building: BuildingInstance; fromX: number; fromY: number };
@@ -102,4 +179,9 @@ export interface GameEvents {
   'clock:tick': { deltaMs: number };
   'save:loaded': { data: SaveData };
   'save:saved': undefined;
+  'battle:started': undefined;
+  'battle:ended': { result: BattleResult };
+  'battle:unitDeployed': { unit: BattleUnit };
+  'battle:unitDied': { unit: BattleUnit };
+  'battle:buildingDestroyed': { building: BattleBuilding | BattleDefense };
 }
