@@ -15,7 +15,10 @@ export interface BuildingLevelConfig {
   storageCapacity?: number;
   damage?: number;
   range?: number;
+  /** 攻击速度（秒/次，仅 defense 类型有） */
   attackSpeed?: number;
+  /** 军队容量（仅 military 类型有） */
+  armyCapacity?: number;
 }
 
 /** 建筑配置 */
@@ -54,6 +57,7 @@ export interface SaveData {
   resources: PlayerResources;
   buildings: BuildingInstance[];
   army: ArmySlot[];
+  trophies: number;
   lastOnlineTime: number;
 }
 

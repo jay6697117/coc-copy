@@ -162,7 +162,38 @@
         background: linear-gradient(180deg, #3a5a9a 0%, #2a3a6a 100%);
         padding: 12px; border: none; border-radius: 8px;
         color: #fff; font-size: 14px; font-weight: bold; cursor: pointer; width: 100%;
+        transition: transform 0.2s;
       }
+      .result-btn:hover { transform: scale(1.02); }
+
+      /* 搜索动画 */
+      #search-box {
+        display: none; position: fixed; top: 50%; left: 50%;
+        transform: translate(-50%, -50%);
+        width: 280px; padding: 32px 24px;
+        background: linear-gradient(180deg, #2a2a4a 0%, #1a1a3a 100%);
+        border: 2px solid #6a6a9a; border-radius: 16px;
+        z-index: 200; color: #fff; text-align: center;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+      }
+      #search-box.show { display: block; }
+      #search-text { font-size: 16px; margin-bottom: 8px; }
+      #search-trophies { font-size: 13px; color: #ffd700; }
+      @keyframes searchPulse {
+        0%, 100% { opacity: 0.6; transform: translate(-50%, -50%) scale(1); }
+        50% { opacity: 1; transform: translate(-50%, -50%) scale(1.02); }
+      }
+      #search-box.show { animation: searchPulse 1s ease infinite; }
+
+      /* 奖杯显示 */
+      .trophy-display {
+        margin-left: 8px; color: #ffd700; font-size: 13px; font-weight: bold;
+        display: flex; align-items: center; gap: 4px;
+      }
+
+      /* 按钮增强悬停 */
+      .info-btn:hover { transform: scale(1.05); }
+      .action-btn:hover { box-shadow: 0 0 12px rgba(100,100,255,0.3); }
     </style>
   </head>
   <body>
@@ -185,6 +216,7 @@
         <span class="value" id="gem-value">0</span>
       </div>
       <div class="army-info" id="army-info">⚔️ 0/20</div>
+      <div class="trophy-display" id="trophy-display">🏆 0</div>
     </div>
 
     <!-- 建造面板（村庄模式） -->
@@ -208,6 +240,12 @@
 
     <!-- 战斗部署栏 -->
     <div id="deploy-panel"></div>
+
+    <!-- 搜索动画 -->
+    <div id="search-box">
+      <div id="search-text">搜索对手中...</div>
+      <div id="search-trophies">🏆 0</div>
+    </div>
 
     <!-- 弹窗 -->
     <div id="overlay"></div>

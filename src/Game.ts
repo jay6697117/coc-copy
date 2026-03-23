@@ -17,30 +17,43 @@ import { MapRenderer } from './rendering/MapRenderer.js';
 import { CameraController } from './rendering/CameraController.js';
 import { BuildingRenderer } from './rendering/BuildingRenderer.js';
 import { BattleRenderer } from './rendering/BattleRenderer.js';
-import type { BuildingConfig, BuildingInstance, SaveData, BattleResult } from './types/index.js';
+import { BattleFx } from './rendering/BattleFx.js';
+import type { BuildingConfig, SaveData, BattleResult } from './types/index.js';
 
-/** 游戏场景 */
 type GameScene = 'village' | 'battle';
-/** 村庄交互模式 */
 type InteractionMode = 'idle' | 'placing' | 'moving';
 
+/** 联赛等级名称 */
+const LEAGUES = [
+  { name: '青铜', min: 0, emoji: '🥉' },
+  { name: '白银', min: 400, emoji: '🥈' },
+  { name: '黄金', min: 800, emoji: '🥇' },
+  { name: '水晶', min: 1200, emoji: '💎' },
+  { name: '冠军', min: 2000, emoji: '👑' },
+];
+
+function getLeague(trophies: number) {
+  let league = LEAGUES[0];
+  for (const l of LEAGUES) { if (trophies >= l.min) league = l; }
+  return league;
+}
+
 export class Game {
-  // PixiJS
   private app!: Application;
   private worldContainer!: Container;
 
-  // 核心系统
+  // 核心
   private eventBus = new EventBus();
   private configLoader = new ConfigLoader();
   private gameClock = new GameClock(this.eventBus);
   private dataStore = new DataStore();
 
-  // 游戏逻辑
+  // 逻辑
   private gridMap = new GridMap();
   private buildingSystem = new BuildingSystem(this.eventBus, this.configLoader, this.gridMap);
   private resourceManager = new ResourceManager(this.eventBus, this.configLoader, this.buildingSystem);
   private upgradeSystem = new UpgradeSystem(this.eventBus, this.configLoader, this.buildingSystem, this.resourceManager);
-  private armySystem = new ArmySystem(this.configLoader, this.resourceManager);
+  private armySystem = new ArmySystem(this.configLoader, this.buildingSystem, this.resourceManager);
   private battleEngine = new BattleEngine(this.eventBus, this.configLoader);
 
   // 渲染
@@ -48,8 +61,9 @@ export class Game {
   private buildingRenderer!: BuildingRenderer;
   private camera!: CameraController;
   private battleRenderer!: BattleRenderer;
+  private battleFx: BattleFx | null = null;
 
-  // 场景状态
+  // 状态
   private scene: GameScene = 'village';
   private mode: InteractionMode = 'idle';
   private placingConfig: BuildingConfig | null = null;
@@ -57,24 +71,14 @@ export class Game {
   private pointerDownX = 0;
   private pointerDownY = 0;
   private readonly CLICK_THRESHOLD = 5;
-
-  // 自动保存
   private autoSaveTimer = 0;
   private readonly AUTO_SAVE_INTERVAL = 30000;
-
-  // 弹窗
   private selectedBuildingUid: string | null = null;
-
-  // 训练面板状态
   private showingTrainPanel = false;
-
-  // 战斗部署选中的兵种
   private deployingTroopId: string | null = null;
-
-  // 战斗循环帧 ID
   private battleFrameId: number | null = null;
+  private trophies = 0;
 
-  /** 初始化游戏 */
   async init(): Promise<void> {
     this.app = new Application();
     await this.app.init({
@@ -86,38 +90,26 @@ export class Game {
     });
     document.getElementById('game-container')!.appendChild(this.app.canvas);
 
-    // 渲染层
     this.worldContainer = this.mapRenderer.getWorldContainer();
     this.app.stage.addChild(this.worldContainer);
-
     this.buildingRenderer = new BuildingRenderer(
-      this.mapRenderer.buildingLayer,
-      this.mapRenderer.overlayLayer,
-      this.configLoader,
+      this.mapRenderer.buildingLayer, this.mapRenderer.overlayLayer, this.configLoader,
     );
-
     this.camera = new CameraController(this.worldContainer, this.app.canvas);
     this.mapRenderer.renderGround(this.gridMap);
-
-    // 战斗渲染器
     this.battleRenderer = new BattleRenderer(this.app, this.configLoader);
 
-    // 数据
     await this.dataStore.init();
     await this.loadGame();
 
-    // UI
     this.setupBuildPanel();
     this.updateResourceUI();
     this.updateArmyInfo();
-
-    // 交互
     this.setupInteraction();
     this.setupEventListeners();
     this.setupBuildingInfoPanel();
     this.setupBattleUI();
 
-    // 时钟
     this.gameClock.start();
     this.eventBus.on('clock:tick', ({ deltaMs }) => {
       if (this.scene === 'village') {
@@ -142,6 +134,7 @@ export class Game {
     this.resourceManager.setResources(saveData.resources);
     this.buildingSystem.loadBuildings(saveData.buildings);
     if (saveData.army) this.armySystem.loadArmy(saveData.army);
+    this.trophies = saveData.trophies ?? 0;
 
     for (const building of this.buildingSystem.getAllBuildings()) {
       this.buildingRenderer.addBuilding(building);
@@ -160,6 +153,7 @@ export class Game {
       resources: this.resourceManager.exportResources(),
       buildings: this.buildingSystem.exportBuildings(),
       army: this.armySystem.exportArmy(),
+      trophies: this.trophies,
       lastOnlineTime: Date.now(),
     };
     await this.dataStore.save(saveData);
@@ -176,7 +170,7 @@ export class Game {
     attackBtn.className = 'action-btn attack';
     attackBtn.id = 'attack-btn';
     attackBtn.innerHTML = `<span class="icon">⚔️</span><span class="label">进攻!</span>`;
-    attackBtn.addEventListener('click', () => this.startBattle());
+    attackBtn.addEventListener('click', () => this.showSearchAnimation());
     panel.appendChild(attackBtn);
 
     // 训练按钮
@@ -187,14 +181,11 @@ export class Game {
     trainBtn.addEventListener('click', () => this.toggleTrainPanel());
     panel.appendChild(trainBtn);
 
-    // 分隔线
     const sep = document.createElement('div');
     sep.style.cssText = 'width:1px;height:50px;background:#444;flex-shrink:0;';
     panel.appendChild(sep);
 
-    // 建筑按钮
-    const buildings = this.configLoader.getAllBuildings();
-    for (const config of buildings) {
+    for (const config of this.configLoader.getAllBuildings()) {
       const level1 = config.levels[0];
       const btn = document.createElement('button');
       btn.className = 'build-btn';
@@ -209,7 +200,6 @@ export class Game {
       btn.addEventListener('click', () => this.startPlacing(config));
       panel.appendChild(btn);
     }
-
     this.updateBuildButtons();
     this.setupTrainPanel();
   }
@@ -223,13 +213,12 @@ export class Game {
     }
   }
 
-  // ========== 训练面板 ==========
+  // ========== 训练 ==========
 
   private setupTrainPanel(): void {
     const panel = document.getElementById('train-panel')!;
     panel.innerHTML = '';
 
-    // 返回按钮
     const backBtn = document.createElement('button');
     backBtn.className = 'action-btn';
     backBtn.innerHTML = `<span class="icon">↩️</span><span class="label">返回</span>`;
@@ -240,16 +229,15 @@ export class Game {
     sep.style.cssText = 'width:1px;height:50px;background:#4488cc;flex-shrink:0;';
     panel.appendChild(sep);
 
-    // 兵种按钮
     for (const troop of this.configLoader.getAllTroops()) {
-      const level1 = troop.levels[0];
+      const l1 = troop.levels[0];
       const btn = document.createElement('button');
       btn.className = 'train-btn';
       btn.id = `train-${troop.id}`;
       btn.innerHTML = `
         <span class="icon">${troop.icon}</span>
         <span class="label">${troop.name}</span>
-        <span class="cost elixir">💧${level1.cost}</span>
+        <span class="cost elixir">💧${l1.cost}</span>
       `;
       btn.addEventListener('click', () => this.trainTroop(troop.id));
       panel.appendChild(btn);
@@ -264,13 +252,12 @@ export class Game {
   }
 
   private trainTroop(troopId: string): void {
-    const success = this.armySystem.trainTroop(troopId);
-    if (success) {
+    if (this.armySystem.trainTroop(troopId)) {
       this.updateArmyInfo();
       this.updateTrainButtons();
       this.updateHint(`✅ 训练了一个${this.configLoader.getTroop(troopId)?.name ?? '单位'}`);
     } else {
-      this.updateHint('❌ 无法训练：容量不足或资源不足');
+      this.updateHint('❌ 容量不足或资源不足');
     }
   }
 
@@ -278,8 +265,8 @@ export class Game {
     for (const troop of this.configLoader.getAllTroops()) {
       const btn = document.getElementById(`train-${troop.id}`);
       if (!btn) continue;
-      const level1 = troop.levels[0];
-      const canAfford = this.resourceManager.canAfford(level1.cost, level1.costType);
+      const l1 = troop.levels[0];
+      const canAfford = this.resourceManager.canAfford(l1.cost, l1.costType);
       const hasCapacity = this.armySystem.getRemainingCapacity() >= troop.housingSpace;
       btn.classList.toggle('disabled', !canAfford || !hasCapacity);
     }
@@ -313,7 +300,7 @@ export class Game {
     this.updateHint('拖拽平移 | 滚轮缩放 | 点击建筑查看信息');
   }
 
-  // ========== 交互事件 ==========
+  // ========== 交互 ==========
 
   private setupInteraction(): void {
     const canvas = this.app.canvas;
@@ -339,18 +326,13 @@ export class Game {
         if (isClick) this.handleBattleDeploy(e);
         return;
       }
-
       if (this.mode === 'placing' && this.placingConfig && isClick) {
-        this.handlePlacement(e);
-        return;
+        this.handlePlacement(e); return;
       }
       if (this.mode === 'moving' && this.movingBuildingUid) {
-        this.confirmMove(e);
-        return;
+        this.confirmMove(e); return;
       }
-      if (this.mode === 'idle' && isClick) {
-        this.handleBuildingClick(e);
-      }
+      if (this.mode === 'idle' && isClick) this.handleBuildingClick(e);
     });
 
     canvas.addEventListener('contextmenu', (e) => {
@@ -366,18 +348,14 @@ export class Game {
     });
   }
 
-  // ========== 村庄交互方法 ==========
-
   private showPlacementPreview(e: PointerEvent): void {
     if (!this.placingConfig) return;
     const rect = this.app.canvas.getBoundingClientRect();
     const world = this.camera.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
     const grid = this.gridMap.pixelToGrid(world.x, world.y);
     const offset = Math.floor(this.placingConfig.size / 2);
-    const gx = grid.gridX - offset;
-    const gy = grid.gridY - offset;
-    const canPlace = this.gridMap.canPlace(gx, gy, this.placingConfig.size);
-    this.buildingRenderer.showPreview(gx, gy, this.placingConfig, canPlace);
+    const gx = grid.gridX - offset, gy = grid.gridY - offset;
+    this.buildingRenderer.showPreview(gx, gy, this.placingConfig, this.gridMap.canPlace(gx, gy, this.placingConfig.size));
   }
 
   private handlePlacement(e: PointerEvent): void {
@@ -386,22 +364,17 @@ export class Game {
     const world = this.camera.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
     const grid = this.gridMap.pixelToGrid(world.x, world.y);
     const offset = Math.floor(this.placingConfig.size / 2);
-    const gx = grid.gridX - offset;
-    const gy = grid.gridY - offset;
-
-    const level1 = this.placingConfig.levels[0];
-    if (!this.resourceManager.canAfford(level1.cost, level1.costType)) {
-      this.updateHint('❌ 资源不足！');
-      return;
-    }
-
+    const gx = grid.gridX - offset, gy = grid.gridY - offset;
+    const l1 = this.placingConfig.levels[0];
+    if (!this.resourceManager.canAfford(l1.cost, l1.costType)) { this.updateHint('❌ 资源不足！'); return; }
     const building = this.buildingSystem.placeBuilding(this.placingConfig.id, gx, gy);
     if (building) {
-      this.resourceManager.spend(level1.cost, level1.costType);
+      this.resourceManager.spend(l1.cost, l1.costType);
       this.buildingRenderer.addBuilding(building);
       this.buildingRenderer.clearPreview();
       this.updateHint(`✅ ${this.placingConfig.name} 放置成功`);
       this.updateBuildButtons();
+      this.updateArmyInfo(); // 兵营放置后更新容量
       this.saveGame();
     }
   }
@@ -438,9 +411,7 @@ export class Game {
     const world = this.camera.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
     const grid = this.gridMap.pixelToGrid(world.x, world.y);
     const offset = Math.floor(config.size / 2);
-    const gx = grid.gridX - offset;
-    const gy = grid.gridY - offset;
-
+    const gx = grid.gridX - offset, gy = grid.gridY - offset;
     if (this.buildingSystem.moveBuilding(this.movingBuildingUid, gx, gy)) {
       this.buildingRenderer.updateBuildingPosition(this.movingBuildingUid, gx, gy);
       this.saveGame();
@@ -468,7 +439,7 @@ export class Game {
     const config = this.configLoader.getBuilding(building.configId);
     if (!config) return;
     this.selectedBuildingUid = uid;
-    const levelConfig = config.levels[building.level - 1];
+    const lc = config.levels[building.level - 1];
 
     const iconEl = document.getElementById('info-icon');
     const titleEl = document.getElementById('info-title');
@@ -480,25 +451,26 @@ export class Game {
     if (titleEl) titleEl.textContent = config.name;
     if (levelEl) levelEl.textContent = `等级 ${building.level} / ${config.levels.length}`;
 
-    let statsHtml = '';
-    if (levelConfig) {
-      statsHtml += `<div><span class="stat-label">生命值：</span><span class="stat-value">${levelConfig.hp}</span></div>`;
-      if (levelConfig.productionRate) statsHtml += `<div><span class="stat-label">产出：</span><span class="stat-value">${levelConfig.productionRate}/时</span></div>`;
-      if (levelConfig.storageCapacity) statsHtml += `<div><span class="stat-label">容量：</span><span class="stat-value">${levelConfig.storageCapacity.toLocaleString()}</span></div>`;
-      if (levelConfig.damage) statsHtml += `<div><span class="stat-label">伤害：</span><span class="stat-value">${levelConfig.damage}</span></div>`;
-      if (levelConfig.range) statsHtml += `<div><span class="stat-label">射程：</span><span class="stat-value">${levelConfig.range}格</span></div>`;
+    let html = '';
+    if (lc) {
+      html += `<div><span class="stat-label">生命值：</span><span class="stat-value">${lc.hp}</span></div>`;
+      if (lc.productionRate) html += `<div><span class="stat-label">产出：</span><span class="stat-value">${lc.productionRate}/时</span></div>`;
+      if (lc.storageCapacity) html += `<div><span class="stat-label">容量：</span><span class="stat-value">${lc.storageCapacity.toLocaleString()}</span></div>`;
+      if (lc.damage) html += `<div><span class="stat-label">伤害：</span><span class="stat-value">${lc.damage}</span></div>`;
+      if (lc.range) html += `<div><span class="stat-label">射程：</span><span class="stat-value">${lc.range}格</span></div>`;
+      if (lc.armyCapacity) html += `<div><span class="stat-label">军队容量：</span><span class="stat-value">${lc.armyCapacity}</span></div>`;
     }
 
     if (building.isUpgrading) {
       const remaining = this.upgradeSystem.getRemainingTime(building);
-      statsHtml += `<div style="color:#ffa726;margin-top:8px">⏳ 升级中... ${this.upgradeSystem.formatTime(remaining)}</div>`;
+      html += `<div style="color:#ffa726;margin-top:8px">⏳ 升级中... ${this.upgradeSystem.formatTime(remaining)}</div>`;
       upgradeBtn.textContent = '升级中...';
       upgradeBtn.disabled = true;
     } else {
       const cost = this.upgradeSystem.getUpgradeCost(building);
       if (cost) {
         const ci = cost.costType === 'gold' ? '🪙' : '💧';
-        statsHtml += `<div style="margin-top:8px;color:#aaa;font-size:12px">下一级：${ci}${cost.cost.toLocaleString()} | ⏱${this.upgradeSystem.formatTime(cost.time)}</div>`;
+        html += `<div style="margin-top:8px;color:#aaa;font-size:12px">下一级：${ci}${cost.cost.toLocaleString()} | ⏱${this.upgradeSystem.formatTime(cost.time)}</div>`;
         const can = this.upgradeSystem.canUpgrade(building);
         upgradeBtn.textContent = `升级 ${ci}${cost.cost.toLocaleString()}`;
         upgradeBtn.disabled = !can.ok;
@@ -508,7 +480,7 @@ export class Game {
       }
     }
 
-    if (statsEl) statsEl.innerHTML = statsHtml;
+    if (statsEl) statsEl.innerHTML = html;
     document.getElementById('building-info')?.classList.add('show');
     document.getElementById('overlay')?.classList.add('show');
   }
@@ -520,14 +492,13 @@ export class Game {
     if (this.upgradeSystem.startUpgrade(building)) {
       this.showBuildingInfo(this.selectedBuildingUid);
       this.updateBuildButtons();
+      this.updateArmyInfo(); // 兵营升级后更新容量
       this.saveGame();
     }
   }
 
   private handleMoveFromInfo(): void {
     if (!this.selectedBuildingUid) return;
-    const building = this.buildingSystem.getBuilding(this.selectedBuildingUid);
-    if (!building) return;
     this.closeBuildingInfo();
     this.mode = 'moving';
     this.movingBuildingUid = this.selectedBuildingUid;
@@ -540,6 +511,42 @@ export class Game {
     document.getElementById('overlay')?.classList.remove('show');
   }
 
+  // ========== 搜索动画 ==========
+
+  private showSearchAnimation(): void {
+    if (this.armySystem.isEmpty()) {
+      this.updateHint('❌ 没有军队！先训练士兵');
+      return;
+    }
+
+    const overlay = document.getElementById('overlay')!;
+    const searchBox = document.getElementById('search-box')!;
+    overlay.classList.add('show');
+    searchBox.classList.add('show');
+
+    const searchText = document.getElementById('search-text')!;
+    const searchTrophies = document.getElementById('search-trophies')!;
+    searchTrophies.textContent = `🏆 ${this.trophies}`;
+
+    // 模拟搜索
+    let dots = 0;
+    const searching = setInterval(() => {
+      dots = (dots + 1) % 4;
+      searchText.textContent = '搜索对手中' + '.'.repeat(dots);
+    }, 400);
+
+    setTimeout(() => {
+      clearInterval(searching);
+      searchText.textContent = '✅ 找到对手！';
+
+      setTimeout(() => {
+        searchBox.classList.remove('show');
+        overlay.classList.remove('show');
+        this.startBattle();
+      }, 600);
+    }, 1500 + Math.random() * 1000);
+  }
+
   // ========== 战斗系统 ==========
 
   private setupBattleUI(): void {
@@ -547,38 +554,34 @@ export class Game {
     document.getElementById('result-return-btn')?.addEventListener('click', () => this.returnToVillage());
   }
 
-  /** 生成 AI 对手基地 */
-  private generateEnemyBase(): BuildingInstance[] {
-    const base: BuildingInstance[] = [];
+  private generateEnemyBase() {
+    // 根据奖杯数调整难度
+    const difficulty = Math.min(3, Math.floor(this.trophies / 400) + 1);
+    const base = [];
     let uid = 0;
 
-    // 大本营在中央
-    base.push({ uid: `e${uid++}`, configId: 'town_hall', gridX: 18, gridY: 18, level: 1, isUpgrading: false });
-
-    // 金矿
+    base.push({ uid: `e${uid++}`, configId: 'town_hall', gridX: 18, gridY: 18, level: Math.min(difficulty, 3), isUpgrading: false });
     base.push({ uid: `e${uid++}`, configId: 'gold_mine', gridX: 10, gridY: 10, level: 1, isUpgrading: false });
     base.push({ uid: `e${uid++}`, configId: 'gold_mine', gridX: 25, gridY: 10, level: 1, isUpgrading: false });
-
-    // 圣水收集器
     base.push({ uid: `e${uid++}`, configId: 'elixir_collector', gridX: 10, gridY: 25, level: 1, isUpgrading: false });
-
-    // 金库
     base.push({ uid: `e${uid++}`, configId: 'gold_storage', gridX: 14, gridY: 14, level: 1, isUpgrading: false });
 
     // 加农炮
-    base.push({ uid: `e${uid++}`, configId: 'cannon', gridX: 15, gridY: 23, level: 1, isUpgrading: false });
-    base.push({ uid: `e${uid++}`, configId: 'cannon', gridX: 23, gridY: 15, level: 1, isUpgrading: false });
+    base.push({ uid: `e${uid++}`, configId: 'cannon', gridX: 15, gridY: 23, level: Math.min(difficulty, 3), isUpgrading: false });
+    base.push({ uid: `e${uid++}`, configId: 'cannon', gridX: 23, gridY: 15, level: Math.min(difficulty, 3), isUpgrading: false });
+
+    // 高奖杯加弓箭塔
+    if (difficulty >= 2) {
+      base.push({ uid: `e${uid++}`, configId: 'archer_tower', gridX: 20, gridY: 12, level: Math.min(difficulty - 1, 3), isUpgrading: false });
+    }
+    if (difficulty >= 3) {
+      base.push({ uid: `e${uid++}`, configId: 'archer_tower', gridX: 12, gridY: 20, level: 1, isUpgrading: false });
+    }
 
     return base;
   }
 
-  /** 开始战斗 */
   private startBattle(): void {
-    if (this.armySystem.isEmpty()) {
-      this.updateHint('❌ 没有军队！先训练士兵');
-      return;
-    }
-
     this.scene = 'battle';
 
     // 隐藏村庄 UI
@@ -591,52 +594,84 @@ export class Game {
     document.getElementById('battle-hud')?.classList.add('show');
     document.getElementById('deploy-panel')?.classList.add('show');
 
-    // 隐藏村庄渲染
     this.worldContainer.visible = false;
 
-    // 初始化战斗
     const enemyBase = this.generateEnemyBase();
     const army = this.armySystem.getArmy();
-    this.battleEngine.initBattle(enemyBase, army, 2000, 2000);
+    const lootGold = 1500 + this.trophies * 2;
+    const lootElixir = 1500 + this.trophies * 2;
+    this.battleEngine.initBattle(enemyBase, army, lootGold, lootElixir);
 
-    // 初始化战斗渲染
     this.battleRenderer.initBattlefield(this.battleEngine);
     this.app.stage.addChild(this.battleRenderer.getWorldContainer());
 
-    // 设置部署面板
+    // 初始化特效系统
+    this.battleFx = new BattleFx(this.battleRenderer.getWorldContainer());
+
     this.setupDeployPanel();
 
-    // 启动战斗循环
+    // 战斗循环（含特效）
     let lastTime = performance.now();
+    let lastUnitHp = new Map<string, number>();
+    let lastBldHp = new Map<string, number>();
+
+    // 记录初始 HP
+    for (const u of this.battleEngine.units) lastUnitHp.set(u.uid, u.hp);
+    for (const b of this.battleEngine.buildings) lastBldHp.set(b.uid, b.hp);
+
     const battleLoop = (now: number) => {
       const deltaMs = now - lastTime;
       lastTime = now;
+      const dt = deltaMs / 1000;
 
-      // 更新战斗
       const result = this.battleEngine.tick(deltaMs);
-
-      // 更新渲染
       this.battleRenderer.update(this.battleEngine);
 
-      // 更新 HUD
+      // 特效：检查 HP 变化
+      if (this.battleFx) {
+        for (const u of this.battleEngine.units) {
+          const prev = lastUnitHp.get(u.uid) ?? u.maxHp;
+          if (u.hp < prev) {
+            const dmg = prev - u.hp;
+            this.battleFx.showDamage(u.x, u.y, Math.round(dmg));
+            this.battleFx.showAttackFlash(u.x, u.y, 0xff4444);
+          }
+          lastUnitHp.set(u.uid, u.hp);
+        }
+
+        for (const b of this.battleEngine.buildings) {
+          const prev = lastBldHp.get(b.uid) ?? b.maxHp;
+          const cx = (b.gridX + b.size / 2) * 32;
+          const cy = (b.gridY + b.size / 2) * 32;
+          if (b.hp < prev) {
+            const dmg = prev - b.hp;
+            this.battleFx.showDamage(cx, cy, Math.round(dmg));
+            this.battleFx.showAttackFlash(cx, cy);
+          }
+          if (b.destroyed && prev > 0) {
+            this.battleFx.showExplosion(cx, cy);
+          }
+          lastBldHp.set(b.uid, b.hp);
+        }
+
+        this.battleFx.update(dt);
+      }
+
       this.updateBattleHUD();
 
       if (result) {
         this.showBattleResult(result);
         return;
       }
-
       this.battleFrameId = requestAnimationFrame(battleLoop);
     };
     this.battleFrameId = requestAnimationFrame(battleLoop);
   }
 
-  /** 设置部署面板 */
   private setupDeployPanel(): void {
     const panel = document.getElementById('deploy-panel')!;
     panel.innerHTML = '';
 
-    // 开战按钮
     const fightBtn = document.createElement('button');
     fightBtn.className = 'deploy-btn';
     fightBtn.style.borderColor = '#44ff44';
@@ -651,7 +686,6 @@ export class Game {
     for (const slot of this.battleEngine.deployableArmy) {
       const config = this.configLoader.getTroop(slot.troopId);
       if (!config) continue;
-
       const btn = document.createElement('button');
       btn.className = 'deploy-btn';
       btn.id = `deploy-${slot.troopId}`;
@@ -669,7 +703,6 @@ export class Game {
     }
   }
 
-  /** 更新部署面板计数 */
   private refreshDeployPanel(): void {
     for (const slot of this.battleEngine.deployableArmy) {
       const btn = document.getElementById(`deploy-${slot.troopId}`);
@@ -680,32 +713,28 @@ export class Game {
     }
   }
 
-  /** 处理战斗部署点击 */
   private handleBattleDeploy(e: PointerEvent): void {
     if (!this.deployingTroopId) return;
     if (this.battleEngine.phase === 'ended') return;
 
-    const battleWorld = this.battleRenderer.getWorldContainer();
+    const bw = this.battleRenderer.getWorldContainer();
     const rect = this.app.canvas.getBoundingClientRect();
-    const screenX = e.clientX - rect.left;
-    const screenY = e.clientY - rect.top;
-    const worldX = (screenX - battleWorld.x) / battleWorld.scale.x;
-    const worldY = (screenY - battleWorld.y) / battleWorld.scale.y;
+    const worldX = (e.clientX - rect.left - bw.x) / bw.scale.x;
+    const worldY = (e.clientY - rect.top - bw.y) / bw.scale.y;
 
     const unit = this.battleEngine.deployUnit(this.deployingTroopId, worldX, worldY);
     if (unit) {
+      // 部署烟雾特效
+      this.battleFx?.showDeploySmoke(worldX, worldY);
       this.refreshDeployPanel();
     }
   }
 
-  /** 更新战斗 HUD */
   private updateBattleHUD(): void {
     const timer = document.getElementById('battle-timer');
     if (timer) {
       const s = Math.ceil(this.battleEngine.battleTimer);
-      const min = Math.floor(s / 60);
-      const sec = s % 60;
-      timer.textContent = `${min}:${String(sec).padStart(2, '0')}`;
+      timer.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
     }
 
     const pct = document.getElementById('battle-percent');
@@ -718,19 +747,26 @@ export class Game {
     }
   }
 
-  /** 提前结束战斗 */
   private endBattleEarly(): void {
     this.battleEngine.startFighting();
-    // 设置计时器为 0 触发结算
     this.battleEngine.battleTimer = 0;
   }
 
-  /** 显示战斗结算 */
   private showBattleResult(result: BattleResult): void {
     if (this.battleFrameId !== null) {
       cancelAnimationFrame(this.battleFrameId);
       this.battleFrameId = null;
     }
+
+    // 奖杯计算
+    let trophyChange = 0;
+    if (result.stars >= 3) trophyChange = 30;
+    else if (result.stars >= 2) trophyChange = 20;
+    else if (result.stars >= 1) trophyChange = 10;
+    else trophyChange = -10;
+
+    this.trophies = Math.max(0, this.trophies + trophyChange);
+    const league = getLeague(this.trophies);
 
     const titleEl = document.getElementById('result-title');
     const starsEl = document.getElementById('result-stars');
@@ -738,37 +774,39 @@ export class Game {
 
     if (titleEl) titleEl.textContent = result.stars >= 2 ? '🎉 胜利！' : result.stars >= 1 ? '⚔️ 部分胜利' : '💀 失败';
     if (starsEl) {
-      let starStr = '';
-      for (let i = 0; i < 3; i++) starStr += i < result.stars ? '⭐' : '☆';
-      starsEl.textContent = starStr;
+      let s = '';
+      for (let i = 0; i < 3; i++) s += i < result.stars ? '⭐' : '☆';
+      starsEl.textContent = s;
     }
+
+    const sign = trophyChange >= 0 ? '+' : '';
     if (statsEl) {
       statsEl.innerHTML = `
         <div>摧毁率：${result.percentDestroyed}%</div>
         <div>掠夺金币：🪙 ${result.goldLooted.toLocaleString()}</div>
         <div>掠夺圣水：💧 ${result.elixirLooted.toLocaleString()}</div>
+        <div style="margin-top:8px;font-weight:bold">🏆 ${sign}${trophyChange} 奖杯 → ${this.trophies}</div>
+        <div>${league.emoji} ${league.name}联赛</div>
       `;
     }
 
     document.getElementById('battle-result')?.classList.add('show');
     document.getElementById('overlay')?.classList.add('show');
 
-    // 获取掠夺的资源
     this.resourceManager.earn(result.goldLooted, 'gold');
     this.resourceManager.earn(result.elixirLooted, 'elixir');
   }
 
-  /** 返回村庄 */
   private returnToVillage(): void {
     this.scene = 'village';
     this.closeBattleResult();
 
-    // 清理战斗
     this.app.stage.removeChild(this.battleRenderer.getWorldContainer());
     this.battleRenderer.clearAll();
+    this.battleFx?.clearAll();
+    this.battleFx = null;
     this.armySystem.clearArmy();
 
-    // 恢复村庄 UI
     this.worldContainer.visible = true;
     document.getElementById('build-panel')!.style.display = 'flex';
     document.getElementById('resource-panel')!.style.display = 'flex';
@@ -779,6 +817,7 @@ export class Game {
     this.deployingTroopId = null;
     this.updateResourceUI();
     this.updateArmyInfo();
+    this.updateTrophyDisplay();
     this.saveGame();
   }
 
@@ -787,23 +826,21 @@ export class Game {
     document.getElementById('overlay')?.classList.remove('show');
   }
 
-  // ========== 事件监听 ==========
+  // ========== 事件 ==========
 
   private setupEventListeners(): void {
     this.eventBus.on('resource:changed', () => {
       this.updateResourceUI();
       this.updateBuildButtons();
     });
-
     this.eventBus.on('building:upgraded', ({ building }) => {
       this.buildingRenderer.updateBuildingLevel(building);
+      this.updateArmyInfo(); // 兵营升级后更新容量
       this.saveGame();
     });
-
     window.addEventListener('resize', () => this.camera.handleResize());
   }
 
-  /** 更新资源 UI */
   private updateResourceUI(): void {
     const res = this.resourceManager.getResources();
     const caps = this.resourceManager.getStorageCaps();
@@ -817,6 +854,15 @@ export class Game {
     if (gem) gem.textContent = res.gems.toLocaleString();
     if (gc) gc.textContent = `/ ${caps.goldCap.toLocaleString()}`;
     if (ec) ec.textContent = `/ ${caps.elixirCap.toLocaleString()}`;
+    this.updateTrophyDisplay();
+  }
+
+  private updateTrophyDisplay(): void {
+    const el = document.getElementById('trophy-display');
+    if (el) {
+      const league = getLeague(this.trophies);
+      el.textContent = `${league.emoji} ${this.trophies}`;
+    }
   }
 
   private updateHint(text: string): void {

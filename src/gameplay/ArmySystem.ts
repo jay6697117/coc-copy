@@ -1,28 +1,39 @@
 // ============================================================
-// 军队系统 — 管理兵种训练、军队编成和容量
+// 军队系统 — 管理兵种训练、军队编成和容量（兵营联动）
 // ============================================================
 
 import type { ConfigLoader } from '../core/ConfigLoader.js';
+import type { BuildingSystem } from './BuildingSystem.js';
 import type { ResourceManager } from './ResourceManager.js';
 import type { ArmySlot } from '../types/index.js';
 
 export class ArmySystem {
   private configLoader: ConfigLoader;
+  private buildingSystem: BuildingSystem;
   private resourceManager: ResourceManager;
-
-  /** 当前军队 */
   private army: ArmySlot[] = [];
 
-  /** 最大容量（基于兵营等级） */
-  private maxCapacity = 20;
-
-  constructor(configLoader: ConfigLoader, resourceManager: ResourceManager) {
+  constructor(configLoader: ConfigLoader, buildingSystem: BuildingSystem, resourceManager: ResourceManager) {
     this.configLoader = configLoader;
+    this.buildingSystem = buildingSystem;
     this.resourceManager = resourceManager;
   }
 
-  setMaxCapacity(capacity: number): void { this.maxCapacity = capacity; }
-  getMaxCapacity(): number { return this.maxCapacity; }
+  /** 计算军队最大容量（基于所有兵营等级总和） */
+  getMaxCapacity(): number {
+    let total = 0;
+    for (const b of this.buildingSystem.getAllBuildings()) {
+      if (b.configId !== 'barracks') continue;
+      const config = this.configLoader.getBuilding('barracks');
+      if (!config) continue;
+      const levelCfg = config.levels[b.level - 1];
+      if (levelCfg && 'armyCapacity' in levelCfg) {
+        total += (levelCfg as { armyCapacity: number }).armyCapacity;
+      }
+    }
+    // 没有兵营时给默认 20 容量（方便前期游戏）
+    return total > 0 ? total : 20;
+  }
 
   getCurrentCapacity(): number {
     let total = 0;
@@ -33,7 +44,7 @@ export class ArmySystem {
     return total;
   }
 
-  getRemainingCapacity(): number { return this.maxCapacity - this.getCurrentCapacity(); }
+  getRemainingCapacity(): number { return this.getMaxCapacity() - this.getCurrentCapacity(); }
 
   trainTroop(troopId: string): boolean {
     const config = this.configLoader.getTroop(troopId);

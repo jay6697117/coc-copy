@@ -79,6 +79,7 @@ export class DataStore {
       ],
       lastOnlineTime: Date.now(),
       army: [],
+      trophies: 0,
     };
   }
 }
