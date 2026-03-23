@@ -1,5 +1,5 @@
 // ============================================================
-// 建筑渲染器 — 渲染建筑方块和放置预览
+// 建筑渲染器 — 渲染建筑方块、等级标识和放置预览
 // ============================================================
 
 import { Container, Graphics, Text } from 'pixi.js';
@@ -12,6 +12,8 @@ interface BuildingSprite {
   container: Container;
   background: Graphics;
   icon: Text;
+  levelBadge: Container; // 等级标识
+  levelText: Text;
 }
 
 export class BuildingRenderer {
@@ -57,19 +59,58 @@ export class BuildingRenderer {
     });
     icon.anchor?.set(0.5);
     icon.x = sizePx / 2;
-    icon.y = sizePx / 2;
+    icon.y = sizePx / 2 - 4;
     container.addChild(icon);
+
+    // 等级标识（右下角小圆圈）
+    const badgeContainer = new Container();
+    
+    const badge = new Graphics();
+    badge.circle(0, 0, 7);
+    badge.fill({ color: 0x000000, alpha: 0.7 });
+    badge.circle(0, 0, 7);
+    badge.stroke({ color: 0xffffff, width: 1, alpha: 0.6 });
+    badgeContainer.addChild(badge);
+
+    const levelText = new Text({
+      text: String(building.level),
+      style: {
+        fontSize: 9,
+        fill: 0xffffff,
+        fontWeight: 'bold',
+      },
+    });
+    levelText.anchor?.set(0.5);
+    badgeContainer.addChild(levelText);
+
+    badgeContainer.x = sizePx - 10;
+    badgeContainer.y = sizePx - 10;
+    container.addChild(badgeContainer);
 
     // 定位到网格坐标
     container.x = building.gridX * CELL_PX;
     container.y = building.gridY * CELL_PX;
 
-    // 设置为可交互
     container.eventMode = 'static';
     container.cursor = 'pointer';
 
     this.buildingLayer.addChild(container);
-    this.sprites.set(building.uid, { container, background: bg, icon });
+    this.sprites.set(building.uid, {
+      container,
+      background: bg,
+      icon,
+      levelBadge: badgeContainer,
+      levelText,
+    });
+  }
+
+  /** 更新建筑等级显示（升级完成后调用） */
+  updateBuildingLevel(building: BuildingInstance): void {
+    const sprite = this.sprites.get(building.uid);
+    if (!sprite) return;
+
+    // 更新等级数字
+    sprite.levelText.text = String(building.level);
   }
 
   /** 移除一个建筑的渲染 */
@@ -91,7 +132,7 @@ export class BuildingRenderer {
     }
   }
 
-  /** 获取建筑精灵的容器（用于绑定事件） */
+  /** 获取建筑精灵的容器 */
   getBuildingContainer(uid: string): Container | null {
     return this.sprites.get(uid)?.container ?? null;
   }
@@ -102,7 +143,6 @@ export class BuildingRenderer {
     const sizePx = config.size * CELL_PX;
     const g = new Graphics();
 
-    // 半透明方块，绿色=可放置，红色=不可放置
     const color = canPlace ? 0x00ff00 : 0xff0000;
     g.roundRect(0, 0, sizePx, sizePx, 3);
     g.fill({ color, alpha: 0.4 });
