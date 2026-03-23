@@ -52,8 +52,9 @@ export class ArmySystem {
     if (this.getRemainingCapacity() < config.housingSpace) return false;
 
     const levelConfig = config.levels[0];
-    if (!this.resourceManager.canAfford(levelConfig.cost, levelConfig.costType)) return false;
-    this.resourceManager.spend(levelConfig.cost, levelConfig.costType);
+    const resType = levelConfig.costType === 'dark_elixir' ? 'elixir' as const : levelConfig.costType;
+    if (!this.resourceManager.canAfford(levelConfig.cost, resType)) return false;
+    this.resourceManager.spend(levelConfig.cost, resType);
 
     const existing = this.army.find(s => s.troopId === troopId);
     if (existing) { existing.count += 1; }

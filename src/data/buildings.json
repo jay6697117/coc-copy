@@ -14,6 +14,18 @@
     ]
   },
   {
+    "id": "builder_hut",
+    "name": "工人小屋",
+    "category": "core",
+    "size": 2,
+    "color": 8936960,
+    "icon": "🔨",
+    "maxCount": { "1": 2, "2": 3, "3": 4, "4": 5 },
+    "levels": [
+      { "cost": 250, "costType": "gems", "buildTime": 0, "hp": 250 }
+    ]
+  },
+  {
     "id": "gold_mine",
     "name": "金矿",
     "category": "resource",
@@ -123,6 +135,105 @@
       { "cost": 50, "costType": "gold", "buildTime": 0, "hp": 300 },
       { "cost": 1000, "costType": "gold", "buildTime": 0, "hp": 500 },
       { "cost": 5000, "costType": "gold", "buildTime": 0, "hp": 700 }
+    ]
+  },
+  {
+    "id": "dark_elixir_drill",
+    "name": "暗黑重油钻井",
+    "category": "resource",
+    "size": 3,
+    "color": 3342387,
+    "icon": "🛢️",
+    "maxCount": { "3": 1, "4": 2 },
+    "levels": [
+      { "cost": 3000, "costType": "gold", "buildTime": 60, "hp": 400, "productionRate": 0.5 },
+      { "cost": 6000, "costType": "gold", "buildTime": 120, "hp": 550, "productionRate": 1.0 },
+      { "cost": 12000, "costType": "gold", "buildTime": 180, "hp": 700, "productionRate": 1.5 }
+    ]
+  },
+  {
+    "id": "dark_elixir_storage",
+    "name": "暗黑重油容器",
+    "category": "storage",
+    "size": 3,
+    "color": 2236962,
+    "icon": "⬛",
+    "maxCount": { "3": 1, "4": 1 },
+    "levels": [
+      { "cost": 4000, "costType": "gold", "buildTime": 60, "hp": 500, "storageAmount": 5000 },
+      { "cost": 8000, "costType": "gold", "buildTime": 120, "hp": 700, "storageAmount": 15000 },
+      { "cost": 15000, "costType": "gold", "buildTime": 180, "hp": 900, "storageAmount": 30000 }
+    ]
+  },
+  {
+    "id": "tesla",
+    "name": "特斯拉电磁塔",
+    "category": "defense",
+    "size": 2,
+    "color": 6737151,
+    "icon": "⚡",
+    "maxCount": { "3": 1, "4": 2 },
+    "isHidden": true,
+    "levels": [
+      { "cost": 3000, "costType": "gold", "buildTime": 120, "hp": 400, "damage": 30, "attackSpeed": 0.6, "range": 5 },
+      { "cost": 6000, "costType": "gold", "buildTime": 180, "hp": 550, "damage": 42, "attackSpeed": 0.6, "range": 5 },
+      { "cost": 12000, "costType": "gold", "buildTime": 240, "hp": 700, "damage": 55, "attackSpeed": 0.6, "range": 6 }
+    ]
+  },
+  {
+    "id": "air_defense",
+    "name": "防空火箭",
+    "category": "defense",
+    "size": 3,
+    "color": 16711680,
+    "icon": "🚀",
+    "maxCount": { "2": 1, "3": 2, "4": 3 },
+    "airOnly": true,
+    "levels": [
+      { "cost": 2000, "costType": "gold", "buildTime": 60, "hp": 400, "damage": 60, "attackSpeed": 1.0, "range": 8 },
+      { "cost": 5000, "costType": "gold", "buildTime": 120, "hp": 550, "damage": 80, "attackSpeed": 1.0, "range": 8 },
+      { "cost": 10000, "costType": "gold", "buildTime": 180, "hp": 700, "damage": 100, "attackSpeed": 1.0, "range": 10 }
+    ]
+  },
+  {
+    "id": "bomb_trap",
+    "name": "炸弹",
+    "category": "trap",
+    "size": 1,
+    "color": 16744448,
+    "icon": "💣",
+    "maxCount": { "1": 2, "2": 4, "3": 6, "4": 8 },
+    "isHidden": true,
+    "levels": [
+      { "cost": 200, "costType": "gold", "buildTime": 0, "hp": 1, "damage": 50, "triggerRadius": 3 },
+      { "cost": 500, "costType": "gold", "buildTime": 0, "hp": 1, "damage": 80, "triggerRadius": 3 }
+    ]
+  },
+  {
+    "id": "spring_trap",
+    "name": "弹簧",
+    "category": "trap",
+    "size": 1,
+    "color": 65280,
+    "icon": "🔄",
+    "maxCount": { "1": 2, "2": 3, "3": 4, "4": 6 },
+    "isHidden": true,
+    "levels": [
+      { "cost": 300, "costType": "gold", "buildTime": 0, "hp": 1, "springCapacity": 15 }
+    ]
+  },
+  {
+    "id": "dark_barracks",
+    "name": "暗黑兵营",
+    "category": "army",
+    "size": 3,
+    "color": 4194432,
+    "icon": "⚫",
+    "maxCount": { "3": 1, "4": 1 },
+    "levels": [
+      { "cost": 3000, "costType": "elixir", "buildTime": 60, "hp": 500, "armyCapacity": 10 },
+      { "cost": 6000, "costType": "elixir", "buildTime": 120, "hp": 650, "armyCapacity": 15 },
+      { "cost": 10000, "costType": "elixir", "buildTime": 180, "hp": 800, "armyCapacity": 20 }
     ]
   }
 ]

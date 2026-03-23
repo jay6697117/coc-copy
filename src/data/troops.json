@@ -75,5 +75,91 @@
       { "cost": 300, "costType": "elixir", "hp": 24, "damage": 16, "attackSpeed": 1.0, "wallDamageMultiplier": 40 },
       { "cost": 600, "costType": "elixir", "hp": 29, "damage": 20, "attackSpeed": 1.0, "wallDamageMultiplier": 40 }
     ]
+  },
+  {
+    "id": "wizard",
+    "name": "法师",
+    "icon": "🧙",
+    "housingSpace": 4,
+    "trainTime": 30,
+    "favoriteTarget": "any",
+    "moveSpeed": 10,
+    "attackType": "ranged",
+    "attackRange": 7,
+    "isSplash": true,
+    "levels": [
+      { "cost": 400, "costType": "elixir", "hp": 75, "damage": 50, "attackSpeed": 1.5 },
+      { "cost": 800, "costType": "elixir", "hp": 90, "damage": 70, "attackSpeed": 1.5 },
+      { "cost": 1600, "costType": "elixir", "hp": 108, "damage": 90, "attackSpeed": 1.5 }
+    ]
+  },
+  {
+    "id": "healer",
+    "name": "治疗者",
+    "icon": "💗",
+    "housingSpace": 14,
+    "trainTime": 60,
+    "favoriteTarget": "ally",
+    "moveSpeed": 10,
+    "attackType": "ranged",
+    "attackRange": 8,
+    "isHealer": true,
+    "levels": [
+      { "cost": 800, "costType": "elixir", "hp": 500, "damage": 0, "attackSpeed": 0.7, "healPerSecond": 25 },
+      { "cost": 1500, "costType": "elixir", "hp": 600, "damage": 0, "attackSpeed": 0.7, "healPerSecond": 35 },
+      { "cost": 3000, "costType": "elixir", "hp": 700, "damage": 0, "attackSpeed": 0.7, "healPerSecond": 50 }
+    ]
+  },
+  {
+    "id": "barbarian_king",
+    "name": "野蛮人之王",
+    "icon": "👑",
+    "housingSpace": 25,
+    "trainTime": 0,
+    "favoriteTarget": "any",
+    "moveSpeed": 12,
+    "attackType": "melee",
+    "isHero": true,
+    "levels": [
+      { "cost": 5000, "costType": "dark_elixir", "hp": 1200, "damage": 120, "attackSpeed": 1.2, "skillDamage": 400 },
+      { "cost": 8000, "costType": "dark_elixir", "hp": 1500, "damage": 150, "attackSpeed": 1.2, "skillDamage": 550 },
+      { "cost": 12000, "costType": "dark_elixir", "hp": 1800, "damage": 180, "attackSpeed": 1.2, "skillDamage": 700 }
+    ]
+  },
+  {
+    "id": "balloon",
+    "name": "气球兵",
+    "icon": "🎈",
+    "housingSpace": 5,
+    "trainTime": 30,
+    "favoriteTarget": "defense",
+    "moveSpeed": 6,
+    "attackType": "ranged",
+    "attackRange": 1,
+    "isFlying": true,
+    "isSplash": true,
+    "levels": [
+      { "cost": 350, "costType": "elixir", "hp": 150, "damage": 25, "attackSpeed": 3.0 },
+      { "cost": 700, "costType": "elixir", "hp": 180, "damage": 32, "attackSpeed": 3.0 },
+      { "cost": 1400, "costType": "elixir", "hp": 220, "damage": 42, "attackSpeed": 3.0 }
+    ]
+  },
+  {
+    "id": "dragon",
+    "name": "飞龙",
+    "icon": "🐉",
+    "housingSpace": 20,
+    "trainTime": 60,
+    "favoriteTarget": "any",
+    "moveSpeed": 8,
+    "attackType": "ranged",
+    "attackRange": 5,
+    "isFlying": true,
+    "isSplash": true,
+    "levels": [
+      { "cost": 1500, "costType": "elixir", "hp": 1400, "damage": 140, "attackSpeed": 1.5 },
+      { "cost": 3000, "costType": "elixir", "hp": 1600, "damage": 160, "attackSpeed": 1.5 },
+      { "cost": 5000, "costType": "elixir", "hp": 1900, "damage": 190, "attackSpeed": 1.5 }
+    ]
   }
 ]

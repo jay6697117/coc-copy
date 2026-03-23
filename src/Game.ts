@@ -8,6 +8,7 @@ import { ConfigLoader } from './core/ConfigLoader.js';
 import { GameClock } from './core/GameClock.js';
 import { DataStore } from './core/DataStore.js';
 import { GridMap } from './gameplay/GridMap.js';
+import { GRID_SIZE, CELL_PX } from './gameplay/GridMap.js';
 import { BuildingSystem } from './gameplay/BuildingSystem.js';
 import { ResourceManager } from './gameplay/ResourceManager.js';
 import { UpgradeSystem } from './gameplay/UpgradeSystem.js';
@@ -18,6 +19,8 @@ import { CameraController } from './rendering/CameraController.js';
 import { BuildingRenderer } from './rendering/BuildingRenderer.js';
 import { BattleRenderer } from './rendering/BattleRenderer.js';
 import { BattleFx } from './rendering/BattleFx.js';
+import { SPELL_CONFIGS } from './gameplay/SpellSystem.js';
+import { AudioManager } from './core/AudioManager.js';
 import type { BuildingConfig, SaveData, BattleResult } from './types/index.js';
 
 type GameScene = 'village' | 'battle';
@@ -63,6 +66,16 @@ function defaultStats(): GameStats {
     totalGoldLooted: 0, totalElixirLooted: 0, peakGold: 0, peakTrophies: 0, unlockedAchievements: [] };
 }
 
+/** 防御日志条目 */
+interface DefenseLogEntry {
+  time: number;
+  stars: number;
+  percent: number;
+  trophyChange: number;
+  goldLost: number;
+  elixirLost: number;
+}
+
 export class Game {
   private app!: Application;
   private worldContainer!: Container;
@@ -99,6 +112,13 @@ export class Game {
   private battleFrameId: number | null = null;
   private trophies = 0;
   private stats: GameStats = defaultStats();
+  private castingSpellId: string | null = null;
+  private tutorialStep = 0;
+  private tutorialShown = false;
+  private audio = new AudioManager();
+  private battleSpeed = 1;
+  private defenseLog: DefenseLogEntry[] = [];
+  private armyPresets: { name: string; army: { troopId: string; count: number }[] }[] = [];
 
   async init(): Promise<void> {
     this.updateLoadingProgress(10, '初始化引擎...');
@@ -137,6 +157,8 @@ export class Game {
     this.setupBattleUI();
     this.setupSettingsPanel();
     this.setupStatsPanel();
+    this.setupMinimap();
+    this.setupTutorial();
     this.updateLoadingProgress(90, '启动时钟...');
 
     this.gameClock.start();
@@ -149,15 +171,16 @@ export class Game {
           this.autoSaveTimer = 0;
           this.saveGame();
         }
-        // 更新最高金币统计
         const res = this.resourceManager.getResources();
         if (res.gold > this.stats.peakGold) this.stats.peakGold = res.gold;
+        this.renderMinimap();
       }
     });
 
     this.updateLoadingProgress(100, '完成！');
-    setTimeout(() => document.getElementById('loading-screen')?.classList.add('hidden'), 400);
-    console.log('🎮 COC Clone v0.5 初始化完成！');
+    setTimeout(() => { document.getElementById('loading-screen')?.classList.add('hidden'); this.maybeShowTutorial(); }, 600);
+    this.setupKeyboardShortcuts();
+    console.log('🎮 COC Clone v0.7 初始化完成！');
   }
 
   // ===== 加载屏 =====
@@ -311,7 +334,8 @@ export class Game {
       const btn = document.getElementById(`train-${troop.id}`);
       if (!btn) continue;
       const l1 = troop.levels[0];
-      btn.classList.toggle('disabled', !this.resourceManager.canAfford(l1.cost, l1.costType) || this.armySystem.getRemainingCapacity() < troop.housingSpace);
+      const costType = l1.costType === 'dark_elixir' ? 'elixir' : l1.costType;
+      btn.classList.toggle('disabled', !this.resourceManager.canAfford(l1.cost, costType as 'gold' | 'elixir' | 'gems') || this.armySystem.getRemainingCapacity() < troop.housingSpace);
     }
   }
 
@@ -322,7 +346,18 @@ export class Game {
 
   // ===== 放置 =====
 
+  /** 获取空闲工人数 */
+  private getFreeBuilders(): number {
+    const huts = this.buildingSystem.getAllBuildings().filter(b => b.configId === 'builder_hut').length;
+    const total = Math.max(1, huts); // 至少 1 工人
+    const busy = this.buildingSystem.getAllBuildings().filter(b => b.isUpgrading).length;
+    return total - busy;
+  }
+
   private startPlacing(config: BuildingConfig): void {
+    if (config.id !== 'builder_hut' && this.getFreeBuilders() <= 0) {
+      this.showToast('❌ 没有空闲工人！建造工人小屋', 'error'); return;
+    }
     if (!this.resourceManager.canAfford(config.levels[0].cost, config.levels[0].costType)) {
       this.showToast('❌ 资源不足！', 'error'); return;
     }
@@ -385,6 +420,7 @@ export class Game {
       this.buildingRenderer.addBuilding(building);
       this.buildingRenderer.clearPreview();
       this.showToast(`✅ ${this.placingConfig.name} 放置成功`, 'success');
+      this.audio.play('build');
       this.stats.buildingsPlaced++;
       this.updateBuildButtons(); this.updateArmyInfo(); this.checkAchievements(); this.saveGame();
     }
@@ -598,6 +634,8 @@ export class Game {
     this.app.stage.addChild(this.battleRenderer.getWorldContainer());
     this.battleFx = new BattleFx(this.battleRenderer.getWorldContainer());
     this.setupDeployPanel();
+    this.setupSpellButtons();
+    this.castingSpellId = null;
 
     let lastTime = performance.now();
     const lastUnitHp = new Map<string, number>();
@@ -608,7 +646,7 @@ export class Game {
     const loop = (now: number) => {
       const dt = (now - lastTime) / 1000;
       lastTime = now;
-      const result = this.battleEngine.tick((now - (now - dt * 1000)));
+      const result = this.battleEngine.tick((now - (now - dt * 1000)) * this.battleSpeed);
       this.battleRenderer.update(this.battleEngine);
 
       if (this.battleFx) {
@@ -621,7 +659,7 @@ export class Game {
           const prev = lastBldHp.get(b.uid) ?? b.maxHp;
           const cx = (b.gridX + b.size / 2) * 32, cy = (b.gridY + b.size / 2) * 32;
           if (b.hp < prev) { this.battleFx.showDamage(cx, cy, Math.round(prev - b.hp)); this.battleFx.showAttackFlash(cx, cy); }
-          if (b.destroyed && prev > 0) this.battleFx.showExplosion(cx, cy);
+          if (b.destroyed && prev > 0) { this.battleFx.showExplosion(cx, cy); this.audio.play('explosion'); }
           lastBldHp.set(b.uid, b.hp);
         }
         this.battleFx.update(dt);
@@ -668,13 +706,27 @@ export class Game {
   }
 
   private handleBattleDeploy(e: PointerEvent): void {
-    if (!this.deployingTroopId || this.battleEngine.phase === 'ended') return;
+    if (this.battleEngine.phase === 'ended') return;
     const bw = this.battleRenderer.getWorldContainer();
     const r = this.app.canvas.getBoundingClientRect();
     const wx = (e.clientX - r.left - bw.x) / bw.scale.x;
     const wy = (e.clientY - r.top - bw.y) / bw.scale.y;
+
+    // 法术施放
+    if (this.castingSpellId) {
+      const spell = this.battleEngine.spellSystem.cast(this.castingSpellId, wx, wy);
+      if (spell) {
+        this.battleFx?.showExplosion(wx, wy);
+        this.audio.play('spell');
+        this.refreshSpellButtons();
+      }
+      return;
+    }
+
+    // 兵种部署
+    if (!this.deployingTroopId) return;
     const unit = this.battleEngine.deployUnit(this.deployingTroopId, wx, wy);
-    if (unit) { this.battleFx?.showDeploySmoke(wx, wy); this.refreshDeployPanel(); }
+    if (unit) { this.battleFx?.showDeploySmoke(wx, wy); this.audio.play('deploy'); this.refreshDeployPanel(); }
   }
 
   private updateBattleHUD(): void {
@@ -684,12 +736,14 @@ export class Game {
     if (p) p.textContent = `${this.battleEngine.getPercentDestroyed()}%`;
     const stars = this.battleEngine.getCurrentStars();
     for (let i = 1; i <= 3; i++) document.getElementById(`star${i}`)?.classList.toggle('earned', i <= stars);
+    this.refreshSpellButtons();
   }
 
   private endBattleEarly(): void { this.battleEngine.startFighting(); this.battleEngine.battleTimer = 0; }
 
   private showBattleResult(result: BattleResult): void {
     if (this.battleFrameId !== null) { cancelAnimationFrame(this.battleFrameId); this.battleFrameId = null; }
+    this.audio.play(result.stars >= 1 ? 'victory' : 'defeat');
 
     let tc = 0;
     if (result.stars >= 3) tc = 30; else if (result.stars >= 2) tc = 20; else if (result.stars >= 1) tc = 10; else tc = -10;
@@ -759,6 +813,11 @@ export class Game {
       }
     });
     document.getElementById('settings-close-btn')?.addEventListener('click', () => this.closeModal('settings-panel'));
+    document.getElementById('toggle-audio-btn')?.addEventListener('click', () => {
+      this.audio.setEnabled(!this.audio.isEnabled());
+      const btn = document.getElementById('toggle-audio-btn');
+      if (btn) btn.textContent = this.audio.isEnabled() ? '开' : '关';
+    });
   }
 
   // ===== 统计面板 =====
@@ -829,5 +888,219 @@ export class Game {
   private updateHint(text: string): void {
     const h = document.getElementById('hint-text');
     if (h) h.textContent = text;
+  }
+
+  // ===== 小地图 =====
+
+  private setupMinimap(): void {
+    const mc = document.getElementById('minimap-canvas') as HTMLCanvasElement;
+    mc?.addEventListener('click', (e) => {
+      const rect = mc.getBoundingClientRect();
+      const rx = (e.clientX - rect.left) / rect.width;
+      const ry = (e.clientY - rect.top) / rect.height;
+      this.camera.centerOnGrid(Math.floor(rx * GRID_SIZE), Math.floor(ry * GRID_SIZE));
+    });
+  }
+
+  private renderMinimap(): void {
+    const mc = document.getElementById('minimap-canvas') as HTMLCanvasElement;
+    if (!mc) return;
+    const ctx = mc.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, 120, 120);
+    ctx.fillStyle = '#2a5a2a';
+    ctx.fillRect(0, 0, 120, 120);
+    const mapPx = GRID_SIZE * CELL_PX;
+    const scale = 120 / mapPx;
+    for (const b of this.buildingSystem.getAllBuildings()) {
+      const config = this.configLoader.getBuilding(b.configId);
+      if (!config) continue;
+      const x = b.gridX * CELL_PX * scale;
+      const y = b.gridY * CELL_PX * scale;
+      const s = config.size * CELL_PX * scale;
+      const c = config.color;
+      ctx.fillStyle = `rgb(${(c>>16)&0xff},${(c>>8)&0xff},${c&0xff})`;
+      ctx.fillRect(x, y, s, s);
+    }
+  }
+
+  // ===== 新手引导 =====
+
+  private setupTutorial(): void {
+    document.getElementById('tutorial-btn')?.addEventListener('click', () => this.nextTutorialStep());
+  }
+
+  private maybeShowTutorial(): void {
+    if (this.stats.buildingsPlaced > 0 || this.tutorialShown) return;
+    this.tutorialShown = true;
+    this.tutorialStep = 0;
+    this.showTutorialStep();
+    document.getElementById('tutorial-panel')?.classList.add('show');
+    document.getElementById('overlay')?.classList.add('show');
+  }
+
+  private showTutorialStep(): void {
+    const steps = [
+      { icon: '🏗️', text: '欢迎！点击下方建筑按钮，\n在地图上放置你的第一个建筑。' },
+      { icon: '⚔️', text: '训练士兵组建军队，\n然后点击「进攻」按钮攻击其他玩家！' },
+      { icon: '🏆', text: '赢得战斗获取奖杯和资源，\n升级建筑让你的村庄更强大！' },
+    ];
+    const step = steps[this.tutorialStep];
+    const content = document.getElementById('tutorial-content');
+    if (content) content.innerHTML = `<div class="tutorial-icon">${step.icon}</div><div class="tutorial-text">${step.text}</div>`;
+    const dots = document.getElementById('tutorial-dots');
+    if (dots) dots.innerHTML = steps.map((_, i) => `<div class="tutorial-dot ${i === this.tutorialStep ? 'active' : ''}"></div>`).join('');
+    const btn = document.getElementById('tutorial-btn');
+    if (btn) btn.textContent = this.tutorialStep >= steps.length - 1 ? '开始游戏！' : '下一步';
+  }
+
+  private nextTutorialStep(): void {
+    this.tutorialStep++;
+    if (this.tutorialStep >= 3) {
+      this.closeModal('tutorial-panel');
+    } else {
+      this.showTutorialStep();
+    }
+  }
+
+  // ===== 法术部署 =====
+
+  private setupSpellButtons(): void {
+    const panel = document.getElementById('deploy-panel')!;
+    const sep = document.createElement('div');
+    sep.style.cssText = 'width:1px;height:50px;background:#555;flex-shrink:0;margin:0 4px;';
+    panel.appendChild(sep);
+
+    for (const spell of SPELL_CONFIGS) {
+      const btn = document.createElement('button');
+      btn.className = 'spell-btn';
+      btn.id = `spell-${spell.id}`;
+      const info = this.battleEngine.spellSystem.getSpellInfo(spell.id);
+      btn.innerHTML = `${spell.icon}<span class="spell-charges">${info.charges}</span>`;
+      btn.title = `${spell.name} — ${spell.effect === 'damage' ? `${spell.power}伤害` : `${spell.power}/秒回血`}`;
+      btn.addEventListener('click', () => {
+        this.castingSpellId = spell.id;
+        this.deployingTroopId = null;
+        document.querySelectorAll('.deploy-btn,.spell-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+      });
+      panel.appendChild(btn);
+    }
+  }
+
+  private refreshSpellButtons(): void {
+    for (const spell of SPELL_CONFIGS) {
+      const btn = document.getElementById(`spell-${spell.id}`);
+      if (!btn) continue;
+      const info = this.battleEngine.spellSystem.getSpellInfo(spell.id);
+      const charges = btn.querySelector('.spell-charges');
+      if (charges) charges.textContent = String(info.charges);
+      btn.classList.toggle('cooldown', !this.battleEngine.spellSystem.canCast(spell.id));
+    }
+  }
+
+  // ===== 快捷键 =====
+
+  private setupKeyboardShortcuts(): void {
+    window.addEventListener('keydown', (e) => {
+      if (this.scene !== 'battle') return;
+
+      // 数字键 1-9 选择兵种
+      const num = parseInt(e.key);
+      if (num >= 1 && num <= 9) {
+        const slots = this.battleEngine.deployableArmy.filter(s => s.count > 0);
+        if (num <= slots.length) {
+          this.deployingTroopId = slots[num - 1].troopId;
+          this.castingSpellId = null;
+          document.querySelectorAll('.deploy-btn,.spell-btn').forEach(b => b.classList.remove('active'));
+          document.getElementById(`deploy-${this.deployingTroopId}`)?.classList.add('active');
+        }
+      }
+
+      // Q/E 选择法术
+      if (e.key === 'q' || e.key === 'Q') {
+        this.castingSpellId = 'lightning';
+        this.deployingTroopId = null;
+        document.querySelectorAll('.deploy-btn,.spell-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById('spell-lightning')?.classList.add('active');
+      }
+      if (e.key === 'e' || e.key === 'E') {
+        this.castingSpellId = 'heal';
+        this.deployingTroopId = null;
+        document.querySelectorAll('.deploy-btn,.spell-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById('spell-heal')?.classList.add('active');
+      }
+
+      // Space 全部署
+      if (e.key === ' ') {
+        e.preventDefault();
+        this.battleEngine.startFighting();
+      }
+
+      // 倍速控制 (X 键切换)
+      if (e.key === 'x' || e.key === 'X') {
+        this.battleSpeed = this.battleSpeed >= 3 ? 1 : this.battleSpeed + 1;
+        this.showToast(`⚓ 战斗速度: ${this.battleSpeed}x`, 'info');
+      }
+
+      // D 键显示防御日志
+      if (e.key === 'd' || e.key === 'D') {
+        this.showDefenseLog();
+        this.openModal('stats-panel');
+      }
+    });
+  }
+
+  // ===== 防御日志 =====
+
+  private addDefenseLog(result: BattleResult, trophyChange: number): void {
+    this.defenseLog.unshift({
+      time: Date.now(),
+      stars: result.stars,
+      percent: result.percentDestroyed,
+      trophyChange,
+      goldLost: result.goldLooted,
+      elixirLost: result.elixirLooted,
+    });
+    if (this.defenseLog.length > 10) this.defenseLog.pop();
+  }
+
+  private showDefenseLog(): void {
+    const content = document.getElementById('stats-content');
+    if (!content) return;
+    let html = '<div style="font-weight:700;margin-bottom:8px">🛡️ 最近战斗记录</div>';
+    if (this.defenseLog.length === 0) {
+      html += '<div style="color:#888;text-align:center;padding:16px">暂无记录</div>';
+    } else {
+      for (const e of this.defenseLog) {
+        const t = new Date(e.time);
+        const ts = `${t.getMonth()+1}/${t.getDate()} ${t.getHours()}:${String(t.getMinutes()).padStart(2,'0')}`;
+        html += `<div class="stat-row"><span class="stat-name">${ts} ${'⭐'.repeat(e.stars)} ${e.percent}%</span><span class="stat-val" style="color:${e.trophyChange>=0?'#4f4':'#f44'}">${e.trophyChange>=0?'+':''}${e.trophyChange}</span></div>`;
+      }
+    }
+    content.innerHTML = html;
+  }
+
+  // ===== 部队预设 =====
+
+  private saveArmyPreset(name: string): void {
+    const army = this.armySystem.getArmy().map(s => ({ troopId: s.troopId, count: s.count }));
+    const existing = this.armyPresets.findIndex(p => p.name === name);
+    if (existing >= 0) this.armyPresets[existing].army = army;
+    else this.armyPresets.push({ name, army });
+    if (this.armyPresets.length > 5) this.armyPresets.pop();
+    this.showToast(`💾 编队「${name}」已保存`, 'success');
+  }
+
+  private loadArmyPreset(name: string): void {
+    const preset = this.armyPresets.find(p => p.name === name);
+    if (!preset) { this.showToast('❌ 预设不存在', 'error'); return; }
+    this.armySystem.clearArmy();
+    for (const s of preset.army) {
+      for (let i = 0; i < s.count; i++) this.armySystem.trainTroop(s.troopId);
+    }
+    this.updateTrainButtons();
+    this.updateArmyInfo();
+    this.showToast(`✅ 编队「${name}」已加载`, 'success');
   }
 }

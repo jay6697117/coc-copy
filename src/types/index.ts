@@ -74,15 +74,17 @@ export interface GridCell {
 /** 兵种等级配置 */
 export interface TroopLevelConfig {
   cost: number;
-  costType: 'gold' | 'elixir';
+  costType: 'gold' | 'elixir' | 'dark_elixir';
   hp: number;
   damage: number;
   attackSpeed: number;
   wallDamageMultiplier?: number;
+  healPerSecond?: number;
+  skillDamage?: number;
 }
 
 /** 兵种偏好目标 */
-export type FavoriteTarget = 'any' | 'defense' | 'resource' | 'wall';
+export type FavoriteTarget = 'any' | 'defense' | 'resource' | 'wall' | 'ally';
 
 /** 兵种配置（来自 JSON） */
 export interface TroopConfig {
@@ -96,6 +98,9 @@ export interface TroopConfig {
   attackType: 'melee' | 'ranged';
   attackRange?: number;
   isSplash?: boolean;
+  isHealer?: boolean;
+  isHero?: boolean;
+  isFlying?: boolean;
   levels: TroopLevelConfig[];
 }
 
@@ -130,6 +135,12 @@ export interface BattleUnit {
   targetUid: string | null;
   attackCooldown: number;
   state: 'moving' | 'attacking' | 'dead';
+  isHealer?: boolean;
+  healPerSecond?: number;
+  isSplash?: boolean;
+  isHero?: boolean;
+  skillDamage?: number;
+  isFlying?: boolean;
 }
 
 /** 战场上的防御建筑实例 */
